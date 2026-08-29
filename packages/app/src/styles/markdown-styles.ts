@@ -16,7 +16,11 @@ function contentHeadingLineHeight(contentSize: number, tier: keyof typeof FONT_S
  *
  * Usage:
  *   const markdownStyles = useMemo(() => createMarkdownStyles(theme), [theme]);
- *   <Markdown style={markdownStyles}>{content}</Markdown>
+ *   <Markdown style={markdownStyles} markdownit={parser}>{content}</Markdown>
+ *
+ * Always pass `markdownit` from `@/utils/markdown-parser`. Omit it and
+ * react-native-markdown-display builds its own parser with `typographer: true`,
+ * which rewrites a literal `(c)` as ©.
  */
 export function createMarkdownStyles(theme: Theme) {
   return {
@@ -350,6 +354,26 @@ export function createMarkdownStyles(theme: Theme) {
     },
 
     softbreak: {},
+  };
+}
+
+/** Keeps interactive and code affordances legible while lowering prose hierarchy. */
+export function createMutedMarkdownStyles(theme: Theme) {
+  const baseStyles = createMarkdownStyles(theme);
+  const color = theme.colors.foregroundMuted;
+
+  return {
+    ...baseStyles,
+    body: { ...baseStyles.body, color },
+    heading1: { ...baseStyles.heading1, color },
+    heading2: { ...baseStyles.heading2, color },
+    heading3: { ...baseStyles.heading3, color },
+    heading4: { ...baseStyles.heading4, color },
+    heading5: { ...baseStyles.heading5, color },
+    heading6: { ...baseStyles.heading6, color },
+    th: { ...baseStyles.th, color },
+    td: { ...baseStyles.td, color },
+    blockquote: { ...baseStyles.blockquote, color },
   };
 }
 

@@ -203,6 +203,15 @@ export const ar: TranslationResources = {
     empty: "ابدأ الدردشة مع هذا الوكيل...",
     scrollToBottom: "قم بالتمرير إلى الأسفل",
     historyLoadFailed: "تعذر تحميل سجل الوكيل",
+    completedResponse: {
+      messages: {
+        one: "{{count}} رسالة",
+        other: "{{count}} رسائل",
+      },
+      workDetails: "تفاصيل العمل",
+      showSummary: "إظهار {{summary}}",
+      hideSummary: "إخفاء {{summary}}",
+    },
     permission: {
       plan: "يخطط",
       required: "الإذن مطلوب",
@@ -416,6 +425,7 @@ export const ar: TranslationResources = {
     },
     fileActions: {
       openFile: "افتح الملف",
+      openIn: "فتح في {{target}}",
       openToSide: "فتح إلى الجانب",
       copyPath: "نسخ المسار",
       copyRelativePath: "نسخ المسار النسبي",
@@ -1557,6 +1567,10 @@ export const ar: TranslationResources = {
         title: "اتصال مباشر",
         description: "الشبكة المحلية أو VPN.",
       },
+      remoteSsh: {
+        title: "SSH عن بُعد",
+        description: "الاتصال عبر عميل SSH لسطح المكتب.",
+      },
       scanQr: {
         title: "مسح رمز QR",
         description: "اتصال التتابع المشفر.",
@@ -1607,6 +1621,23 @@ export const ar: TranslationResources = {
         unableToConnect:
           "غير قادر على الاتصال. تحقق من المضيف /port ومن إمكانية الوصول إلى البرنامج الخفي.",
         details: "التفاصيل:{{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "SSH عن بُعد",
+      helper: "الاتصال بخادم Paseo يعمل على المضيف البعيد.",
+      fields: {
+        target: "مضيف SSH",
+      },
+      actions: {
+        cancel: "إلغاء",
+        connect: "اتصال",
+        connecting: "جارٍ الاتصال...",
+      },
+      errors: {
+        targetRequired: "مضيف SSH مطلوب",
+        invalidTarget: "أدخل مضيف ssh:// صالحًا",
+        failedToConnect: "تعذر الاتصال عبر SSH. {{detail}}",
       },
     },
     link: {
@@ -1791,6 +1822,12 @@ export const ar: TranslationResources = {
     output: "الإخراج",
   },
   toolCallGroup: {
+    calls: {
+      one: "{{count}} استدعاء أداة",
+      other: "{{count}} استدعاءات أدوات",
+    },
+    showSummary: "إظهار {{summary}}",
+    hideSummary: "إخفاء {{summary}}",
     editedFiles: {
       one: "حرّر {{count}} ملفًا",
       other: "حرّر {{count}} ملفات",
@@ -1969,6 +2006,10 @@ export const ar: TranslationResources = {
       autoExpandReasoning: {
         label: "عرض التفكير دائماً",
         description: "إظهار تفكير الوكيل وخطوات الاستدلال بشكل كامل بشكل افتراضي",
+      },
+      collapseCompletedResponses: {
+        label: "طيّ الردود المكتملة",
+        description: "عرض ملخص للعمل والإجابة النهائية بعد انتهاء الوكيل",
       },
       toolCallDetail: {
         label: "عرض استدعاءات الأدوات",
@@ -2243,6 +2284,7 @@ export const ar: TranslationResources = {
       badges: {
         relay: "تتابع",
         local: "محلي",
+        remoteSsh: "SSH عن بُعد",
       },
       connections: {
         title: "اتصالات",

@@ -203,6 +203,15 @@ export const ja: TranslationResources = {
     empty: "このエージェントとチャットを始めましょう...",
     scrollToBottom: "下にスクロール",
     historyLoadFailed: "エージェントの履歴を読み込めませんでした",
+    completedResponse: {
+      messages: {
+        one: "{{count}}件のメッセージ",
+        other: "{{count}}件のメッセージ",
+      },
+      workDetails: "作業の詳細",
+      showSummary: "{{summary}}を表示",
+      hideSummary: "{{summary}}を非表示",
+    },
     permission: {
       plan: "プラン",
       required: "権限が必要です",
@@ -420,6 +429,7 @@ export const ja: TranslationResources = {
     },
     fileActions: {
       openFile: "ファイルを開く",
+      openIn: "{{target}}で開く",
       openToSide: "横に開く",
       copyPath: "パスをコピー",
       copyRelativePath: "相対パスをコピー",
@@ -1572,6 +1582,10 @@ export const ja: TranslationResources = {
         title: "直接接続",
         description: "ローカルネットワークまたはVPN。",
       },
+      remoteSsh: {
+        title: "リモート SSH",
+        description: "デスクトップの SSH クライアント経由で接続します。",
+      },
       scanQr: {
         title: "QRコードをスキャン",
         description: "暗号化されたリレー接続。",
@@ -1621,6 +1635,23 @@ export const ja: TranslationResources = {
         tlsError: "TLSエラー。直接接続は、デーモンの前にTLS終端がある場合のみSSLを使用します。",
         unableToConnect: "接続できません。ホスト/ポートとデーモンが到達可能かを確認してください。",
         details: "詳細: {{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "リモート SSH",
+      helper: "リモートホストで動作する Paseo デーモンに接続します。",
+      fields: {
+        target: "SSH ホスト",
+      },
+      actions: {
+        cancel: "キャンセル",
+        connect: "接続",
+        connecting: "接続中...",
+      },
+      errors: {
+        targetRequired: "SSH ホストは必須です",
+        invalidTarget: "有効な ssh:// ホストを入力してください",
+        failedToConnect: "SSH で接続できません。{{detail}}",
       },
     },
     link: {
@@ -1809,6 +1840,12 @@ export const ja: TranslationResources = {
     output: "出力",
   },
   toolCallGroup: {
+    calls: {
+      one: "{{count}}件のツール呼び出し",
+      other: "{{count}}件のツール呼び出し",
+    },
+    showSummary: "{{summary}}を表示",
+    hideSummary: "{{summary}}を非表示",
     editedFiles: {
       one: "{{count}}個のファイルを編集",
       other: "{{count}}個のファイルを編集",
@@ -1986,6 +2023,10 @@ export const ja: TranslationResources = {
       autoExpandReasoning: {
         label: "常に思考プロセスを展開",
         description: "デフォルトでAIのエージェント思考・推論ブロックを完全に展開して表示します",
+      },
+      collapseCompletedResponses: {
+        label: "完了した応答を折りたたむ",
+        description: "エージェントの完了後に作業の概要と最終回答を表示します",
       },
       toolCallDetail: {
         label: "ツール呼び出しの表示",
@@ -2262,6 +2303,7 @@ export const ja: TranslationResources = {
       badges: {
         relay: "リレー",
         local: "ローカル",
+        remoteSsh: "リモート SSH",
       },
       connections: {
         title: "接続",

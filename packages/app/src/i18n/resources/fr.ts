@@ -205,6 +205,15 @@ export const fr: TranslationResources = {
     empty: "Commencez à discuter avec cet agent...",
     scrollToBottom: "Faire défiler vers le bas",
     historyLoadFailed: "Impossible de charger l’historique de l’agent",
+    completedResponse: {
+      messages: {
+        one: "{{count}} message",
+        other: "{{count}} messages",
+      },
+      workDetails: "Détails du travail",
+      showSummary: "Afficher {{summary}}",
+      hideSummary: "Masquer {{summary}}",
+    },
     permission: {
       plan: "Plan",
       required: "Autorisation requise",
@@ -420,6 +429,7 @@ export const fr: TranslationResources = {
     },
     fileActions: {
       openFile: "Ouvrir le fichier",
+      openIn: "Ouvrir dans {{target}}",
       openToSide: "Ouvrir sur le côté",
       copyPath: "Copier le chemin",
       copyRelativePath: "Copier le chemin relatif",
@@ -1605,6 +1615,10 @@ export const fr: TranslationResources = {
         title: "Connexion directe",
         description: "Réseau local ou VPN.",
       },
+      remoteSsh: {
+        title: "SSH distant",
+        description: "Connectez-vous avec le client SSH de bureau.",
+      },
       scanQr: {
         title: "Scanner le codeQR",
         description: "Connexion relais cryptée.",
@@ -1655,6 +1669,23 @@ export const fr: TranslationResources = {
         unableToConnect:
           "Impossible de se connecter. Vérifiez l'hôte/portet que le démon est accessible.",
         details: "Détails:{{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "SSH distant",
+      helper: "Connectez-vous à un daemon Paseo sur l’hôte distant.",
+      fields: {
+        target: "Hôte SSH",
+      },
+      actions: {
+        cancel: "Annuler",
+        connect: "Connecter",
+        connecting: "Connexion...",
+      },
+      errors: {
+        targetRequired: "L’hôte SSH est requis",
+        invalidTarget: "Saisissez un hôte ssh:// valide",
+        failedToConnect: "Connexion SSH impossible. {{detail}}",
       },
     },
     link: {
@@ -1842,6 +1873,12 @@ export const fr: TranslationResources = {
     output: "Sortir",
   },
   toolCallGroup: {
+    calls: {
+      one: "{{count}} appel d’outil",
+      other: "{{count}} appels d’outils",
+    },
+    showSummary: "Afficher {{summary}}",
+    hideSummary: "Masquer {{summary}}",
     editedFiles: {
       one: "a modifié {{count}} fichier",
       other: "a modifié {{count}} fichiers",
@@ -2022,6 +2059,10 @@ export const fr: TranslationResources = {
       autoExpandReasoning: {
         label: "Toujours afficher le raisonnement",
         description: "Afficher le raisonnement de l'agent entièrement développé par défaut",
+      },
+      collapseCompletedResponses: {
+        label: "Replier les réponses terminées",
+        description: "Afficher un résumé du travail et la réponse finale une fois l’agent terminé",
       },
       toolCallDetail: {
         label: "Affichage des appels d’outils",
@@ -2299,6 +2340,7 @@ export const fr: TranslationResources = {
       badges: {
         relay: "Relais",
         local: "Locale",
+        remoteSsh: "SSH distant",
       },
       connections: {
         title: "Relations",

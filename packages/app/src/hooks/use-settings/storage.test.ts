@@ -197,6 +197,37 @@ describe("loadAppSettingsFromStorage", () => {
     expect(result.chatOutlineEnabled).toBe(false);
   });
 
+  it("collapses legacy diff destinations into the former Explorer choice", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({
+          openInSidePane: { explorerChanges: true, changesLinks: false },
+        }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.openInSidePane.diffs).toBe(true);
+    expect(result.openInSidePane).not.toHaveProperty("explorerChanges");
+    expect(result.openInSidePane).not.toHaveProperty("changesLinks");
+  });
+
+  it("defaults PRs to Explorer and preserves the legacy side choice", async () => {
+    const defaults = await loadAppSettingsFromStorage(makeDeps());
+    const legacySide = await loadAppSettingsFromStorage(
+      makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ openInSidePane: { pullRequests: true } }),
+        }),
+      }),
+    );
+
+    expect(defaults.pullRequestOpenLocation).toBe("explorer");
+    expect(legacySide.pullRequestOpenLocation).toBe("side");
+    expect(legacySide.openInSidePane).not.toHaveProperty("pullRequests");
+  });
+
   it("uses the native terminal renderer by default", async () => {
     const deps = makeDeps();
 
@@ -578,6 +609,17 @@ describe("appearance settings", () => {
     expect(result.codeFontSize).toBe(DEFAULT_CODE_FONT_SIZE);
     expect(result.syntaxTheme).toBe("one");
     expect(result.toolCallDetailLevel).toBe("detailed");
+    expect(result.collapseCompletedResponses).toBe(false);
+  });
+
+  it("restores the opt-in completed response folding preference", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ collapseCompletedResponses: true }),
+      }),
+    });
+
+    expect((await loadAppSettingsFromStorage(deps)).collapseCompletedResponses).toBe(true);
   });
 
   it("migrates the enabled compact tool call preference to overview", async () => {

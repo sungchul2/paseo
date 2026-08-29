@@ -203,6 +203,15 @@ export const ko: TranslationResources = {
     empty: "이 에이전트와 대화를 시작하세요...",
     scrollToBottom: "맨 아래로 스크롤",
     historyLoadFailed: "에이전트 기록을 로드할 수 없습니다.",
+    completedResponse: {
+      messages: {
+        one: "메시지 {{count}}개",
+        other: "메시지 {{count}}개",
+      },
+      workDetails: "작업 세부 정보",
+      showSummary: "{{summary}} 보기",
+      hideSummary: "{{summary}} 숨기기",
+    },
     permission: {
       plan: "계획",
       required: "권한 필요",
@@ -417,6 +426,7 @@ export const ko: TranslationResources = {
     },
     fileActions: {
       openFile: "파일 열기",
+      openIn: "{{target}}에서 열기",
       openToSide: "옆에 열기",
       copyPath: "경로 복사",
       copyRelativePath: "상대 경로 복사",
@@ -1567,6 +1577,10 @@ export const ko: TranslationResources = {
         title: "직접 연결",
         description: "로컬 네트워크 또는 VPN.",
       },
+      remoteSsh: {
+        title: "원격 SSH",
+        description: "데스크톱 SSH 클라이언트를 통해 연결합니다.",
+      },
       scanQr: {
         title: "QR 코드 스캔",
         description: "암호화된 릴레이 연결.",
@@ -1615,6 +1629,23 @@ export const ko: TranslationResources = {
         tlsError: "TLS 오류. 직접 연결은 데몬 앞에 TLS 종단 장치가 있을 때만 SSL을 사용합니다.",
         unableToConnect: "연결할 수 없습니다. 호스트/포트와 데몬에 접근 가능한지 확인하세요.",
         details: "세부 정보: {{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "원격 SSH",
+      helper: "원격 호스트에서 실행 중인 Paseo 데몬에 연결합니다.",
+      fields: {
+        target: "SSH 호스트",
+      },
+      actions: {
+        cancel: "취소",
+        connect: "연결",
+        connecting: "연결 중...",
+      },
+      errors: {
+        targetRequired: "SSH 호스트가 필요합니다",
+        invalidTarget: "유효한 ssh:// 호스트를 입력하세요",
+        failedToConnect: "SSH로 연결할 수 없습니다. {{detail}}",
       },
     },
     link: {
@@ -1801,6 +1832,12 @@ export const ko: TranslationResources = {
     output: "출력",
   },
   toolCallGroup: {
+    calls: {
+      one: "도구 호출 {{count}}회",
+      other: "도구 호출 {{count}}회",
+    },
+    showSummary: "{{summary}} 보기",
+    hideSummary: "{{summary}} 숨기기",
     editedFiles: {
       one: "{{count}} 파일을 편집했습니다.",
       other: "{{count}} 파일을 편집했습니다.",
@@ -1980,6 +2017,10 @@ export const ko: TranslationResources = {
       autoExpandReasoning: {
         label: "추론 항상 펼치기",
         description: "에이전트의 사고 및 추론 블록을 기본적으로 모두 펼쳐 표시합니다.",
+      },
+      collapseCompletedResponses: {
+        label: "완료된 응답 접기",
+        description: "에이전트가 완료되면 작업 요약과 최종 답변을 표시합니다.",
       },
       toolCallDetail: {
         label: "도구 호출 표시",
@@ -2253,6 +2294,7 @@ export const ko: TranslationResources = {
       badges: {
         relay: "릴레이",
         local: "로컬",
+        remoteSsh: "원격 SSH",
       },
       connections: {
         title: "연결",

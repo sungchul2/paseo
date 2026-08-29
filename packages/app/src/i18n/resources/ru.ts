@@ -203,6 +203,15 @@ export const ru: TranslationResources = {
     empty: "Начните общаться с этим агентом...",
     scrollToBottom: "Прокрутить вниз",
     historyLoadFailed: "Не удалось загрузить историю агента",
+    completedResponse: {
+      messages: {
+        one: "{{count}} сообщение",
+        other: "сообщений: {{count}}",
+      },
+      workDetails: "Подробности работы",
+      showSummary: "Показать: {{summary}}",
+      hideSummary: "Скрыть: {{summary}}",
+    },
     permission: {
       plan: "План",
       required: "Требуется разрешение",
@@ -419,6 +428,7 @@ export const ru: TranslationResources = {
     },
     fileActions: {
       openFile: "Открыть файл",
+      openIn: "Открыть в {{target}}",
       openToSide: "Открыть сбоку",
       copyPath: "Копировать путь",
       copyRelativePath: "Копировать относительный путь",
@@ -578,7 +588,7 @@ export const ru: TranslationResources = {
       },
       menu: {
         openFor: "Открыть меню для {{label}}",
-        copyResumeCommand: "Скопировать команду возобновления",
+        copyResumeCommand: "Копировать команду продолжения",
         copyAgentId: "Скопировать идентификатор агента",
         copyTerminalId: "Скопировать идентификатор терминала",
         copyFilePath: "Скопировать путь к файлу",
@@ -625,7 +635,7 @@ export const ru: TranslationResources = {
         copyFailed: "Не удалось скопировать",
         agentIdCopiedLabel: "ID агента",
         terminalIdCopiedLabel: "Идентификатор терминала",
-        resumeCommandCopiedLabel: "команда возобновления",
+        resumeCommandCopiedLabel: "команда продолжения",
         filePathCopiedLabel: "Путь к файлу",
         resumeIdUnavailable: "ID возобновления недоступен",
         resumeCommandUnavailable: "Команда возобновления недоступна",
@@ -1584,6 +1594,10 @@ export const ru: TranslationResources = {
         title: "Прямое подключение",
         description: "Локальная сеть или VPN.",
       },
+      remoteSsh: {
+        title: "Удалённый SSH",
+        description: "Подключение через SSH-клиент настольного приложения.",
+      },
       scanQr: {
         title: "Сканировать QR-код",
         description: "Зашифрованное подключение через ретранслятор.",
@@ -1634,6 +1648,23 @@ export const ru: TranslationResources = {
         unableToConnect:
           "Не удалось подключиться. Проверьте адрес хоста и порт, а также доступность демона.",
         details: "Подробности: {{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "Удалённый SSH",
+      helper: "Подключитесь к демону Paseo на удалённом хосте.",
+      fields: {
+        target: "Хост SSH",
+      },
+      actions: {
+        cancel: "Отмена",
+        connect: "Подключить",
+        connecting: "Подключение...",
+      },
+      errors: {
+        targetRequired: "Укажите хост SSH",
+        invalidTarget: "Укажите корректный хост ssh://",
+        failedToConnect: "Не удалось подключиться по SSH. {{detail}}",
       },
     },
     link: {
@@ -1822,6 +1853,12 @@ export const ru: TranslationResources = {
     output: "Выходные данные",
   },
   toolCallGroup: {
+    calls: {
+      one: "{{count}} вызов инструмента",
+      other: "вызовов инструментов: {{count}}",
+    },
+    showSummary: "Показать: {{summary}}",
+    hideSummary: "Скрыть: {{summary}}",
     editedFiles: {
       one: "изменён {{count}} файл",
       other: "изменены файлы ({{count}})",
@@ -2003,6 +2040,10 @@ export const ru: TranslationResources = {
         label: "Всегда разворачивать размышления",
         description:
           "По умолчанию полностью разворачивать блоки размышлений и хода рассуждений агента",
+      },
+      collapseCompletedResponses: {
+        label: "Сворачивать завершённые ответы",
+        description: "Показывать сводку работы и итоговый ответ после завершения работы агента",
       },
       toolCallDetail: {
         label: "Отображение вызовов инструментов",
@@ -2280,6 +2321,7 @@ export const ru: TranslationResources = {
       badges: {
         relay: "Ретранслятор",
         local: "Локальный",
+        remoteSsh: "Удалённый SSH",
       },
       connections: {
         title: "Подключения",

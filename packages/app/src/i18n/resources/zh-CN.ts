@@ -203,6 +203,15 @@ export const zhCN: TranslationResources = {
     empty: "开始和这个 Agent 对话...",
     scrollToBottom: "滚动到底部",
     historyLoadFailed: "无法加载智能体历史记录",
+    completedResponse: {
+      messages: {
+        one: "{{count}} 条消息",
+        other: "{{count}} 条消息",
+      },
+      workDetails: "工作详情",
+      showSummary: "显示{{summary}}",
+      hideSummary: "隐藏{{summary}}",
+    },
     permission: {
       plan: "Plan",
       required: "需要权限",
@@ -416,6 +425,7 @@ export const zhCN: TranslationResources = {
     },
     fileActions: {
       openFile: "打开文件",
+      openIn: "在 {{target}} 中打开",
       openToSide: "在侧边打开",
       copyPath: "复制路径",
       copyRelativePath: "复制相对路径",
@@ -1540,6 +1550,10 @@ export const zhCN: TranslationResources = {
         title: "直接连接",
         description: "本地网络或 VPN。",
       },
+      remoteSsh: {
+        title: "远程 SSH",
+        description: "通过桌面 SSH 客户端连接。",
+      },
       scanQr: {
         title: "扫描二维码",
         description: "加密 relay 连接。",
@@ -1588,6 +1602,23 @@ export const zhCN: TranslationResources = {
         tlsError: "TLS 错误。只有 daemon 前方有 TLS terminator 时，直接连接才使用 SSL。",
         unableToConnect: "无法连接。请检查 host/port，并确认 daemon 可达。",
         details: "详情：{{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "远程 SSH",
+      helper: "连接到远程主机上运行的 Paseo 守护进程。",
+      fields: {
+        target: "SSH 主机",
+      },
+      actions: {
+        cancel: "取消",
+        connect: "连接",
+        connecting: "正在连接...",
+      },
+      errors: {
+        targetRequired: "SSH 主机为必填项",
+        invalidTarget: "请输入有效的 ssh:// 主机",
+        failedToConnect: "无法通过 SSH 连接。{{detail}}",
       },
     },
     link: {
@@ -1770,6 +1801,12 @@ export const zhCN: TranslationResources = {
     output: "输出",
   },
   toolCallGroup: {
+    calls: {
+      one: "{{count}} 次工具调用",
+      other: "{{count}} 次工具调用",
+    },
+    showSummary: "显示{{summary}}",
+    hideSummary: "隐藏{{summary}}",
     editedFiles: {
       one: "编辑了 {{count}} 个文件",
       other: "编辑了 {{count}} 个文件",
@@ -1945,6 +1982,10 @@ export const zhCN: TranslationResources = {
       autoExpandReasoning: {
         label: "始终展开推理过程",
         description: "默认情况下完全展开 AI 的思考和推理过程",
+      },
+      collapseCompletedResponses: {
+        label: "折叠已完成的回复",
+        description: "代理完成后显示工作摘要和最终回答",
       },
       toolCallDetail: {
         label: "工具调用显示",
@@ -2217,6 +2258,7 @@ export const zhCN: TranslationResources = {
       badges: {
         relay: "Relay",
         local: "本地",
+        remoteSsh: "远程 SSH",
       },
       connections: {
         title: "连接",
