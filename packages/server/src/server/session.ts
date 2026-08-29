@@ -165,6 +165,8 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ScheduleSession } from "./session/schedule/schedule-session.js";
+import { WatchdogSession } from "./session/watchdog/watchdog-session.js";
+import type { WatchdogService } from "./watchdog/service.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
 import { AgentConfigSession } from "./session/agent-config/agent-config-session.js";
@@ -457,6 +459,7 @@ export interface SessionOptions {
   workspaceLabelService?: WorkspaceLabelService;
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
+  watchdogService?: WatchdogService;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -609,6 +612,14 @@ function resolveDirectorySync(service: DirectorySyncService | undefined): Direct
   return service ?? new DirectorySyncService();
 }
 
+function createOptionalWatchdogSession(
+  service: WatchdogService | undefined,
+  emit: (message: SessionOutboundMessage) => void,
+  logger: pino.Logger,
+): WatchdogSession | null {
+  return service ? new WatchdogSession({ emit }, service, logger) : null;
+}
+
 function describeRegistryTransition(record: ArchivedRecordSnapshot | null): RegistryTransition {
   if (!record) {
     return "created";
@@ -661,6 +672,7 @@ export class Session {
   private readonly paseoHome: string;
   private readonly projectIcons: ProjectIconReader;
   private readonly worktreesRoot: string | undefined;
+  private readonly rewindInitiators = new Map<string, object | undefined>();
 
   private agentManager: AgentManager;
   private readonly agentStorage: AgentStorage;
@@ -728,6 +740,7 @@ export class Session {
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
   private readonly scheduleSession: ScheduleSession;
+  private readonly watchdogSession: WatchdogSession | null;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -763,6 +776,7 @@ export class Session {
       workspaceLabelService,
       filesystem,
       scheduleService,
+      watchdogService,
       checkoutDiffManager,
       github,
       renameCurrentBranch,
@@ -901,6 +915,11 @@ export class Session {
       scheduleService,
       logger: this.sessionLogger,
     });
+    this.watchdogSession = createOptionalWatchdogSession(
+      watchdogService,
+      (msg) => this.emit(msg),
+      this.sessionLogger,
+    );
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -1620,6 +1639,11 @@ export class Session {
 
     this.unsubscribeAgentEvents = this.agentManager.subscribe(
       (event) => {
+        if (event.type === "timeline_replacement") {
+          this.deliverTimelineReplacement(event.agentId, this.rewindInitiators.get(event.agentId));
+          return;
+        }
+
         if (event.type === "agent_state") {
           this.sessionLogger.trace(
             {
@@ -1907,7 +1931,7 @@ export class Session {
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
     const promise =
       this.dispatchVoiceAndControlMessage(msg) ??
-      this.dispatchAgentRewindMessage(msg) ??
+      this.dispatchAgentRewindMessage(msg, source) ??
       this.dispatchAgentRelationshipMessage(msg) ??
       this.dispatchAgentTimelineMessage(msg, source) ??
       this.dispatchHubExecutionMessage(msg) ??
@@ -1923,7 +1947,7 @@ export class Session {
       this.dispatchPluginDirectoryMessage(msg) ??
       this.dispatchPluginMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
-      this.dispatchScheduleMessage(msg) ??
+      this.dispatchDurableAutomationMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
   }
@@ -2153,10 +2177,13 @@ export class Session {
     }
   }
 
-  private dispatchAgentRewindMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchAgentRewindMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     switch (msg.type) {
       case "agent.rewind.request":
-        return this.handleAgentRewindRequest(msg);
+        return this.handleAgentRewindRequest(msg, source);
       default:
         return undefined;
     }
@@ -2553,6 +2580,26 @@ export class Session {
         return this.scheduleSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.scheduleSession.handleScheduleUpdateRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchDurableAutomationMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    return this.dispatchScheduleMessage(msg) ?? this.dispatchWatchdogMessage(msg);
+  }
+
+  private dispatchWatchdogMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!this.watchdogSession) return undefined;
+    switch (msg.type) {
+      case "watchdog.start.request":
+        return this.watchdogSession.handleStart(msg);
+      case "watchdog.list.request":
+        return this.watchdogSession.handleList(msg);
+      case "watchdog.inspect.request":
+        return this.watchdogSession.handleInspect(msg);
+      case "watchdog.cancel.request":
+        return this.watchdogSession.handleCancel(msg);
       default:
         return undefined;
     }
@@ -3872,28 +3919,96 @@ export class Session {
 
   private async handleAgentRewindRequest(
     msg: Extract<SessionInboundMessage, { type: "agent.rewind.request" }>,
+    source?: object,
   ): Promise<void> {
     try {
+      this.rewindInitiators.set(msg.agentId, source);
       await this.agentManager.rewind(msg.agentId, msg.messageId, msg.mode);
-      this.emit({
-        type: "agent.rewind.response",
-        payload: {
-          requestId: msg.requestId,
-          agentId: msg.agentId,
-          ok: true,
-          error: null,
+      this.emitForSource(
+        {
+          type: "agent.rewind.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            ok: true,
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emit({
-        type: "agent.rewind.response",
-        payload: {
-          requestId: msg.requestId,
-          agentId: msg.agentId,
-          ok: false,
-          error: error instanceof Error ? error.message : "Failed to rewind agent",
+      this.emitForSource(
+        {
+          type: "agent.rewind.response",
+          payload: {
+            requestId: msg.requestId,
+            agentId: msg.agentId,
+            ok: false,
+            error: error instanceof Error ? error.message : "Failed to rewind agent",
+          },
         },
+        source,
+      );
+    } finally {
+      this.rewindInitiators.delete(msg.agentId);
+    }
+  }
+
+  private deliverTimelineReplacement(agentId: string, initiatingSource?: object): void {
+    const agent = this.agentManager.getAgent(agentId);
+    if (!agent) return;
+    const timeline = this.agentManager.fetchTimeline(agentId, { limit: 0 });
+    const epoch = timeline.epoch;
+
+    if (this.clientCapabilitiesBySource.size === 0 || !this.onMessageToSource) {
+      if (!this.supports(CLIENT_CAPS.timelineReplacementInvalidation)) {
+        this.emitReconstructedTimelineRows(agentId, agent.provider, timeline.rows, epoch);
+      }
+      return;
+    }
+
+    for (const [source, capabilities] of this.clientCapabilitiesBySource) {
+      const isInitiator = source === initiatingSource;
+      const supportsReplacement = capabilities.has(CLIENT_CAPS.timelineReplacementInvalidation);
+      const isSubscribed = this.viewedTimelineAgentIdsBySource.get(source)?.has(agentId) === true;
+      if (supportsReplacement) {
+        if (isSubscribed && !isInitiator) {
+          this.onMessageToSource(source, {
+            type: "agent.timeline.replacement",
+            payload: { agentId, epoch },
+          });
+        }
+        continue;
+      }
+      // COMPAT(timelineReplacementInvalidation): added in v0.5.0, replay reconstructed
+      // rows to legacy clients until the supported client floor is >= v0.5.0 after 2027-02-21.
+      this.emitReconstructedTimelineRows(agentId, agent.provider, timeline.rows, epoch, source);
+    }
+  }
+
+  private emitReconstructedTimelineRows(
+    agentId: string,
+    provider: ManagedAgent["provider"],
+    rows: AgentTimelineFetchResult["rows"],
+    epoch: string,
+    source?: object,
+  ): void {
+    for (const row of rows) {
+      const event = serializeAgentStreamEvent({
+        type: "timeline",
+        provider,
+        item: row.item,
+        ...(row.turnId ? { turnId: row.turnId } : {}),
+        timestamp: row.timestamp,
       });
+      if (!event) continue;
+      this.emitForSource(
+        {
+          type: "agent_stream",
+          payload: { agentId, event, timestamp: row.timestamp, seq: row.seq, epoch },
+        },
+        source,
+      );
     }
   }
 

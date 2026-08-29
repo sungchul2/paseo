@@ -12,6 +12,7 @@ import type pino from "pino";
 import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js";
 import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
 import type { ScheduleService } from "./schedule/service.js";
+import type { WatchdogService } from "./watchdog/service.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
 import {
@@ -554,6 +555,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly workspaceLabelService: WorkspaceLabelService | null;
   private readonly scheduleService: ScheduleService;
+  private readonly watchdogService: WatchdogService | null;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -652,6 +654,7 @@ export class VoiceAssistantWebSocketServer {
     pluginRuntime?: SessionOptions["pluginRuntime"],
     orchestrationSkills?: SessionOptions["orchestrationSkills"],
     workspaceLabelService?: WorkspaceLabelService,
+    watchdogService?: WatchdogService,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -678,6 +681,7 @@ export class VoiceAssistantWebSocketServer {
       checkoutDiffManager,
     });
     this.scheduleService = requiredServices.scheduleService;
+    this.watchdogService = watchdogService ?? null;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
     this.workspaceGitService = workspaceGitService ?? createFallbackWorkspaceGitService();
@@ -1435,6 +1439,7 @@ export class VoiceAssistantWebSocketServer {
       workspaceLabelService: this.workspaceLabelService ?? undefined,
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
+      watchdogService: this.watchdogService ?? undefined,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -1654,20 +1659,32 @@ export class VoiceAssistantWebSocketServer {
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
         providersSnapshotCwd: true,
-        // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
-        // checkoutGithubSetAutoMerge fallback after 2026-12-28.
+        // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
+        // feature gate and legacy fallback after 2027-01-17 once the supported
+        // daemon floor is >= v0.2.0.
         checkoutForgeSetAutoMerge: true,
-        // COMPAT(checkoutGithubSetAutoMerge): added in v0.1.75, remove gate after 2026-11-13.
+        // COMPAT(checkoutGithubSetAutoMerge): added in v0.1.75 and retained as
+        // the fallback for checkoutForgeSetAutoMerge. Stop advertising it after
+        // 2027-01-17 once supported floors are >= v0.2.0.
         checkoutGithubSetAutoMerge: true,
+        // COMPAT(githubCheckDetails): added in v0.1.92 and retained as the
+        // fallback for forgeCheckDetails. Stop advertising it after 2027-01-17
+        // once supported floors are >= v0.2.0.
         githubCheckDetails: true,
-        // COMPAT(forgeCheckDetails): added in v0.1.106, remove githubCheckDetails fallback after 2026-12-28.
+        // COMPAT(forgeCheckDetails): added in v0.2.0-beta.1. Remove the feature
+        // gate and legacy fallback after 2027-01-17 once the supported daemon
+        // floor is >= v0.2.0.
         forgeCheckDetails: true,
-        // COMPAT(forgeSearch): added in v0.1.106, remove github_search fallback after 2026-12-28.
+        // COMPAT(forgeSearch): added in v0.2.0-beta.1. Remove the feature gate
+        // and legacy fallback after 2027-01-17 once the supported daemon floor
+        // is >= v0.2.0.
         forgeSearch: true,
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         ...(this.advertiseDaemonStatusRpc ? { daemonStatusRpc: true } : {}),
         // COMPAT(daemonConfigReload): added in v0.4.0, remove gate after 2027-02-14.
         daemonConfigReload: true,
+        // COMPAT(durableCommands): added in v0.6.1, remove gate after 2027-02-26.
+        ...(this.watchdogService ? { durableCommands: true } : {}),
         // COMPAT(relayConfig): added in v0.2.6, remove gate after 2027-01-31.
         ...(this.advertiseRelayConfig ? { relayConfig: true } : {}),
         // COMPAT(pushTokenRevocation): added in v0.3.2, remove gate after 2027-02-10.
@@ -1742,7 +1759,8 @@ export class VoiceAssistantWebSocketServer {
         providerRemoval: true,
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: true,
-        // COMPAT(forgeProviders): added in v0.1.106, drop the gate when daemon floor >= v0.1.106.
+        // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after
+        // 2027-01-17 once the supported daemon floor is >= v0.2.0.
         forgeProviders: true,
         // COMPAT(selectiveAgentTimeline): added in v0.1.106, remove after 2027-01-12.
         selectiveAgentTimeline: true,
