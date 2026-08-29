@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "branch": "integration/dev",
+  "officialStableBaseline": {
+    "tag": "v0.6.1",
+    "commit": "20d7efc46a316f5a274b9943a5c43b0322269825"
+  },
+  "effectiveUpstreamCeiling": {
+    "remote": "origin",
+    "ref": "main",
+    "commit": "ed628ff82e1777f6a46f5f8963db6b4ac3ee2ce3"
+  },
+  "features": [
+    {
+      "number": 3974,
+      "owner": "sungchul2",
+      "repo": "paseo",
+      "ref": "feat/durable-watchdog",
+      "head": "0420f0d76227ae4853ecc19156b0efa486162fbe",
+      "role": "owned",
+      "status": "open",
+      "open": true,
+      "url": "https://github.com/getpaseo/paseo/pull/3974"
+    },
+    {
+      "number": 3588,
+      "owner": "getpaseo",
+      "repo": "paseo",
+      "ref": "feature/completed-response-folds",
+      "head": "7254e33506b994fb1d95b6ef0364de91de1711b9",
+      "role": "external",
+      "status": "open",
+      "open": true,
+      "url": "https://github.com/getpaseo/paseo/pull/3588"
+    }
+  ],
+  "verificationGates": {
+    "required": ["exact-sha", "verify-ancestry", "build", "install", "rollback"],
+    "futureStages": ["build", "install", "rollback"]
+  }
+}
