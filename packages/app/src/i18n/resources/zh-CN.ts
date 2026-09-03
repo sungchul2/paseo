@@ -212,6 +212,7 @@ export const zhCN: TranslationResources = {
       showSummary: "显示{{summary}}",
       hideSummary: "隐藏{{summary}}",
     },
+    messageCapped: "此消息已被截断（{{bytes}} 字节）。",
     permission: {
       plan: "Plan",
       required: "需要权限",
@@ -354,7 +355,6 @@ export const zhCN: TranslationResources = {
         added: "已添加",
         started: "已开始",
         completed: "已完成",
-        reopened: "已重新打开",
       },
     },
     compaction: {

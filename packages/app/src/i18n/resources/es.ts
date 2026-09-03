@@ -212,6 +212,7 @@ export const es: TranslationResources = {
       showSummary: "Mostrar {{summary}}",
       hideSummary: "Ocultar {{summary}}",
     },
+    messageCapped: "Este mensaje fue truncado ({{bytes}} bytes).",
     permission: {
       plan: "Plan",
       required: "Permiso requerido",
@@ -357,7 +358,6 @@ export const es: TranslationResources = {
         added: "Añadida",
         started: "Iniciada",
         completed: "Completada",
-        reopened: "Reabierta",
       },
     },
     compaction: {

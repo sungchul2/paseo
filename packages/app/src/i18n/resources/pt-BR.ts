@@ -212,6 +212,7 @@ export const ptBR: TranslationResources = {
       showSummary: "Mostrar {{summary}}",
       hideSummary: "Ocultar {{summary}}",
     },
+    messageCapped: "Esta mensagem foi truncada ({{bytes}} bytes).",
     permission: {
       plan: "Plano",
       required: "Permissão necessária",
@@ -357,7 +358,6 @@ export const ptBR: TranslationResources = {
         added: "Adicionada",
         started: "Iniciada",
         completed: "Concluída",
-        reopened: "Reaberta",
       },
     },
     compaction: {

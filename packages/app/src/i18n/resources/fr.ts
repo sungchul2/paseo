@@ -214,6 +214,7 @@ export const fr: TranslationResources = {
       showSummary: "Afficher {{summary}}",
       hideSummary: "Masquer {{summary}}",
     },
+    messageCapped: "Ce message a été tronqué ({{bytes}} octets).",
     permission: {
       plan: "Plan",
       required: "Autorisation requise",
@@ -358,7 +359,6 @@ export const fr: TranslationResources = {
         added: "Ajoutée",
         started: "Commencée",
         completed: "Terminée",
-        reopened: "Rouverte",
       },
     },
     compaction: {

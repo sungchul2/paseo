@@ -209,6 +209,7 @@ export const en = {
       showSummary: "Show {{summary}}",
       hideSummary: "Hide {{summary}}",
     },
+    messageCapped: "This message was capped ({{bytes}} bytes).",
     permission: {
       plan: "Plan",
       required: "Permission Required",
@@ -352,7 +353,6 @@ export const en = {
         added: "Added",
         started: "Started",
         completed: "Completed",
-        reopened: "Reopened",
       },
     },
     compaction: {

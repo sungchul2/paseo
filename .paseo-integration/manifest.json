@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "branch": "integration/dev",
   "officialStableBaseline": {
-    "tag": "v0.6.1",
-    "commit": "20d7efc46a316f5a274b9943a5c43b0322269825"
+    "tag": "v0.7.2",
+    "commit": "9400a49af670fdb5db4af58e73f8df98588dbea9"
   },
   "effectiveUpstreamCeiling": {
     "remote": "origin",
     "ref": "main",
-    "commit": "ed628ff82e1777f6a46f5f8963db6b4ac3ee2ce3"
+    "commit": "9400a49af670fdb5db4af58e73f8df98588dbea9"
   },
   "features": [
     {

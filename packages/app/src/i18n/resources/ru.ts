@@ -212,6 +212,7 @@ export const ru: TranslationResources = {
       showSummary: "Показать: {{summary}}",
       hideSummary: "Скрыть: {{summary}}",
     },
+    messageCapped: "Это сообщение было обрезано ({{bytes}} байт).",
     permission: {
       plan: "План",
       required: "Требуется разрешение",
@@ -356,7 +357,6 @@ export const ru: TranslationResources = {
         added: "Добавлена",
         started: "Начата",
         completed: "Завершена",
-        reopened: "Возобновлена",
       },
     },
     compaction: {
