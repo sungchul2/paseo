@@ -24,8 +24,12 @@ node .agents/skills/paseo-integration-maintenance/scripts/integration.mjs prefli
 ```
 
 Use `preflight-update` for an official stable tag and `preflight-integrate`
-for a feature or pull-request SHA. `build`, `install`, and `rollback` are not
-available. Do not invent them.
+for a feature or pull-request SHA. The supporting CLI's `build`, `install`,
+and `rollback` commands are not available. Do not invent them.
+
+For an explicitly authorized custom build or install after these gates, use
+`.agents/skills/paseo-integration-build/SKILL.md`. This maintenance skill
+still does not perform those operations.
 
 ## Triggers
 
@@ -54,5 +58,6 @@ request from `integration/dev`.
 Match the user request to one doc operation: official release update, owned
 feature update, external PR integration, or upstreamed reconciliation.
 
-Stop after verify unless a later slice explicitly authorizes build or
-install.
+Stop after verify unless a later slice explicitly authorizes build or install;
+when it does, follow `paseo-integration-build` rather than adding build logic
+to this maintenance flow.
