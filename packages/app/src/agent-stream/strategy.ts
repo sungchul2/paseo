@@ -7,6 +7,7 @@ import type {
   BottomAnchorLocalRequest,
   BottomAnchorRouteRequest,
 } from "./bottom-anchor-controller";
+import type { StickyPromptItem, StickyPromptPublisher } from "./sticky-prompt/model";
 
 type EdgeSlot = "header" | "footer";
 type NeighborRelation = "above" | "below";
@@ -74,6 +75,11 @@ export interface StreamRenderInput {
   // The history row under the top of the viewport, for surfaces that mark where the reader
   // is in the transcript. Only the web viewport measures it today.
   onReadingPositionChange?: (rowId: string | null) => void;
+  stickyPrompt?: {
+    items: readonly StickyPromptItem[];
+    source: StickyPromptPublisher;
+    isMobileBreakpoint: boolean;
+  };
   onNearHistoryStart: () => boolean | Promise<boolean>;
   isLoadingOlderHistory: boolean;
   hasOlderHistory: boolean;

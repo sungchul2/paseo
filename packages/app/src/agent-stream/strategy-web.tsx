@@ -37,6 +37,13 @@ import {
   type HistoryStartSettleScheduler,
 } from "./history-start-settle-scheduler";
 import { useScrollToMessage } from "./use-scroll-to-message.web";
+import { StickyPrompt } from "./sticky-prompt/view";
+import {
+  createStickyPromptRowIndex,
+  findStickyPromptReadingRowId,
+  resolveStickyPromptId,
+  type StickyPromptRowPosition,
+} from "./sticky-prompt/model";
 
 interface CreateWebStreamStrategyInput {
   isMobileBreakpoint: boolean;
@@ -291,6 +298,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     isAuthoritativeHistoryReady,
     onNearBottomChange,
     onReadingPositionChange,
+    stickyPrompt,
     onNearHistoryStart,
     isLoadingOlderHistory,
     hasOlderHistory,
@@ -383,6 +391,15 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     useAnimationFrameWithResizeObserver: true,
     overscan: 8,
   });
+  const stickyPromptRowIndex = useMemo(() => {
+    if (!stickyPrompt) {
+      return null;
+    }
+    return createStickyPromptRowIndex({
+      items: [...segments.historyVirtualized, ...segments.historyMounted, ...segments.liveHead],
+      promptIds: stickyPrompt.items.map((item) => item.id),
+    });
+  }, [segments.historyMounted, segments.historyVirtualized, segments.liveHead, stickyPrompt]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
@@ -717,6 +734,38 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     onReadingPositionChange(readingRowId);
   });
 
+  const reportStickyPromptPosition = useStableEvent(() => {
+    if (!stickyPrompt || !stickyPromptRowIndex) {
+      return;
+    }
+    const scrollContainer = scrollContainerRef.current;
+    const contentNode = contentRef.current;
+    if (!scrollContainer || !contentNode) {
+      stickyPrompt.source.publish(null);
+      return;
+    }
+
+    const viewportTop = scrollContainer.getBoundingClientRect().top;
+    const rowPositions: StickyPromptRowPosition[] = [];
+    for (const element of contentNode.querySelectorAll<HTMLElement>("[data-history-row-id]")) {
+      const promptId = element.dataset.historyRowId;
+      if (!promptId) {
+        continue;
+      }
+      const rect = element.getBoundingClientRect();
+      if (Number.isFinite(rect.top) && Number.isFinite(rect.bottom)) {
+        rowPositions.push({ id: promptId, top: rect.top, bottom: rect.bottom });
+      }
+    }
+
+    stickyPrompt.source.publish(
+      resolveStickyPromptId({
+        index: stickyPromptRowIndex,
+        readingRowId: findStickyPromptReadingRowId(rowPositions, viewportTop),
+      }),
+    );
+  });
+
   const updateScrollMetrics = useCallback(() => {
     if (!isActiveRef.current) {
       return;
@@ -728,7 +777,8 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     }
     syncNearBottom(scrollContainer, onNearBottomChange);
     reportReadingPosition();
-  }, [onNearBottomChange, reportReadingPosition]);
+    reportStickyPromptPosition();
+  }, [onNearBottomChange, reportReadingPosition, reportStickyPromptPosition]);
 
   const { isJumpSettling, scrollToMessage } = useScrollToMessage({
     active: isActive,
@@ -922,6 +972,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       if (pendingResumeGeometryCheckRef.current) {
         pendingResumeGeometryCheckRef.current = false;
         reportReadingPosition();
+        reportStickyPromptPosition();
         const previousGeometry = lastObservedViewportGeometryRef.current;
         lastObservedViewportGeometryRef.current = nextGeometry;
         if (previousGeometry && observedViewportGeometriesEqual(previousGeometry, nextGeometry)) {
@@ -955,6 +1006,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     evaluateHistoryStart,
     isActive,
     reportReadingPosition,
+    reportStickyPromptPosition,
     scheduleHistoryStartPrependSettle,
     scheduleStickToBottom,
     updateScrollMetrics,
@@ -1192,7 +1244,12 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   );
   const mountedHistoryRows = useMemo(() => {
     return segments.historyMounted.map((item, index) => (
-      <div key={item.id} data-history-row-id={item.id} style={streamRowStyle}>
+      <div
+        key={item.id}
+        data-history-row-id={item.id}
+        data-stream-kind={item.kind}
+        style={streamRowStyle}
+      >
         {renderHistoryMountedRow(item, index, segments.historyMounted)}
       </div>
     ));
@@ -1200,7 +1257,12 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const liveHeadRows = useMemo(() => {
     void liveHeadRowRevision;
     return segments.liveHead.map((item, index) => (
-      <div key={item.id} data-history-row-id={item.id} style={streamRowStyle}>
+      <div
+        key={item.id}
+        data-history-row-id={item.id}
+        data-stream-kind={item.kind}
+        style={streamRowStyle}
+      >
         {renderLiveHeadRow(item, index, segments.liveHead)}
       </div>
     ));
@@ -1253,6 +1315,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
                     key={virtualRow.key}
                     data-index={virtualRow.index}
                     data-history-row-id={item.id}
+                    data-stream-kind={item.kind}
                     ref={measureVirtualizedRowElement}
                     style={renderVirtualRowStyle(virtualRow.start)}
                   >
@@ -1277,6 +1340,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
           onUserScrollUp={stopFollowingOutputFromUserIntent}
         />
       ) : null}
+      {stickyPrompt ? <StickyPrompt {...stickyPrompt} /> : null}
     </div>
   );
 }

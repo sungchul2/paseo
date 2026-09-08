@@ -1,6 +1,7 @@
 import {
   Fragment,
   type ReactElement,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -15,9 +16,11 @@ import {
   type ListRenderItemInfo,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ViewToken,
   type ViewStyle,
 } from "react-native";
 import { withUnistyles } from "react-native-unistyles";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { StreamItem } from "@/types/stream";
 import type { Theme } from "@/styles/theme";
@@ -47,6 +50,13 @@ import {
   createHistoryStartSettleScheduler,
   type HistoryStartSettleScheduler,
 } from "./history-start-settle-scheduler";
+import {
+  createStickyPromptRowIndex,
+  findStickyPromptReadingRowId,
+  resolveStickyPromptId,
+  type StickyPromptRowPosition,
+} from "./sticky-prompt/model";
+import { StickyPrompt } from "./sticky-prompt/view";
 
 const DEFAULT_MAINTAIN_VISIBLE_CONTENT_POSITION = Object.freeze({
   minIndexForVisible: 0,
@@ -63,10 +73,34 @@ const historyStartSlotStyle: ViewStyle = {
   height: 32,
   flexShrink: 0,
 };
+const nativeViewportStyle: ViewStyle = {
+  flex: 1,
+  position: "relative",
+};
+const stickyPromptMeasureRowStyle: ViewStyle = {
+  width: "100%",
+};
 const HISTORY_START_SETTLE_FRAMES = 2;
 
 function keyExtractor(item: { id: string }): string {
   return item.id;
+}
+
+function NativeStickyPromptMeasuredRow({
+  itemId,
+  register,
+  children,
+}: {
+  itemId: string;
+  register: (itemId: string, node: View | null) => void;
+  children: ReactNode;
+}) {
+  const handleRef = useCallback((node: View | null) => register(itemId, node), [itemId, register]);
+  return (
+    <View ref={handleRef} style={stickyPromptMeasureRowStyle}>
+      {children}
+    </View>
+  );
 }
 
 function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrategy }) {
@@ -82,6 +116,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     routeBottomAnchorRequest,
     isAuthoritativeHistoryReady,
     onNearBottomChange,
+    stickyPrompt,
     onNearHistoryStart,
     isLoadingOlderHistory,
     hasOlderHistory,
@@ -92,7 +127,15 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     strategy,
   } = props;
   const { renderHistoryMountedRow, renderLiveHeadRow, renderLiveAuxiliary } = renderers;
+  const isActive = useRetainedPanelActive();
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
   const flatListRef = useRef<FlatList<StreamItem>>(null);
+  const viewportRootRef = useRef<View>(null);
+  const stickyPromptRowRefs = useRef(new Map<string, View>());
+  const visibleStickyPromptRowIdsRef = useRef(new Set<string>());
+  const stickyPromptMeasureFrameRef = useRef<number | null>(null);
+  const stickyPromptMeasureGenerationRef = useRef(0);
   const streamViewportMetricsRef = useRef({
     containerKey: "native-virtualized",
     contentHeight: 0,
@@ -124,6 +167,149 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     return [...segments.historyVirtualized, ...segments.historyMounted];
   }, [segments.historyMounted, segments.historyVirtualized]);
   const historyRows = useRevisedHistoryRows(historyItems, historyRowRevision);
+  const stickyPromptRowIndex = useMemo(() => {
+    if (!stickyPrompt) {
+      return null;
+    }
+    return createStickyPromptRowIndex({
+      // FlatList data and its ListHeader are both inverted. Convert each segment back to
+      // chronological order before deriving answer-to-prompt membership.
+      items: [...historyItems.toReversed(), ...segments.liveHead.toReversed()],
+      promptIds: stickyPrompt.items.map((item) => item.id),
+    });
+  }, [historyItems, segments.liveHead, stickyPrompt]);
+  const registerStickyPromptRow = useCallback((itemId: string, node: View | null) => {
+    if (node) {
+      stickyPromptRowRefs.current.set(itemId, node);
+    } else {
+      stickyPromptRowRefs.current.delete(itemId);
+    }
+  }, []);
+  const measureStickyPromptRows = useStableEvent(() => {
+    if (!isActiveRef.current || !stickyPrompt || !stickyPromptRowIndex) {
+      return;
+    }
+    const viewportRoot = viewportRootRef.current;
+    if (!viewportRoot) {
+      stickyPrompt.source.publish(null);
+      return;
+    }
+
+    // Viewability excludes the ListHeader, so seed this with viewable rows and the live head.
+    // The ref map is still bounded by FlatList's mounted window; including its current entries
+    // prevents a stale viewability callback from retaining an old prompt after a jump.
+    const rowIdsToMeasure = new Set(visibleStickyPromptRowIdsRef.current);
+    for (const item of segments.liveHead) {
+      rowIdsToMeasure.add(item.id);
+    }
+    for (const itemId of stickyPromptRowRefs.current.keys()) {
+      rowIdsToMeasure.add(itemId);
+    }
+
+    const rows = [...rowIdsToMeasure]
+      .map((itemId) => ({ itemId, node: stickyPromptRowRefs.current.get(itemId) }))
+      .filter((entry): entry is { itemId: string; node: View } => entry.node !== undefined);
+    const rowPositions: StickyPromptRowPosition[] = [];
+    let viewportTop: number | null = null;
+    const measurementGeneration = ++stickyPromptMeasureGenerationRef.current;
+    const publish = () => {
+      if (
+        measurementGeneration !== stickyPromptMeasureGenerationRef.current ||
+        !isActiveRef.current
+      ) {
+        return;
+      }
+      stickyPrompt.source.publish(
+        resolveStickyPromptId({
+          index: stickyPromptRowIndex,
+          readingRowId:
+            viewportTop === null ? null : findStickyPromptReadingRowId(rowPositions, viewportTop),
+        }),
+      );
+    };
+
+    let remaining = rows.length + 1;
+    const finish = () => {
+      if (remaining <= 0) {
+        return;
+      }
+      remaining -= 1;
+      if (remaining === 0) {
+        publish();
+      }
+    };
+    try {
+      viewportRoot.measureInWindow((_left, top, width, height) => {
+        if (
+          Number.isFinite(top) &&
+          Number.isFinite(width) &&
+          Number.isFinite(height) &&
+          width > 0 &&
+          height > 0
+        ) {
+          viewportTop = top;
+        }
+        finish();
+      });
+    } catch {
+      finish();
+    }
+    for (const { itemId, node } of rows) {
+      try {
+        node.measureInWindow((_left, top, _width, height) => {
+          const bottom = top + height;
+          if (
+            Number.isFinite(top) &&
+            Number.isFinite(height) &&
+            height > 0 &&
+            Number.isFinite(bottom)
+          ) {
+            rowPositions.push({ id: itemId, top, bottom });
+          }
+          finish();
+        });
+      } catch {
+        finish();
+      }
+    }
+  });
+  const scheduleStickyPromptMeasurement = useStableEvent(() => {
+    if (!isActiveRef.current || !stickyPrompt) {
+      return;
+    }
+    if (stickyPromptMeasureFrameRef.current !== null) {
+      return;
+    }
+    stickyPromptMeasureFrameRef.current = requestAnimationFrame(() => {
+      stickyPromptMeasureFrameRef.current = null;
+      measureStickyPromptRows();
+    });
+  });
+  const handleStickyPromptViewableItemsChanged = useStableEvent(
+    ({ viewableItems }: { viewableItems: ViewToken<StreamItem>[] }) => {
+      visibleStickyPromptRowIdsRef.current = new Set(viewableItems.map(({ item }) => item.id));
+      scheduleStickyPromptMeasurement();
+    },
+  );
+  useEffect(() => {
+    if (isActive) {
+      scheduleStickyPromptMeasurement();
+      return;
+    }
+    if (stickyPromptMeasureFrameRef.current !== null) {
+      cancelAnimationFrame(stickyPromptMeasureFrameRef.current);
+      stickyPromptMeasureFrameRef.current = null;
+    }
+    stickyPromptMeasureGenerationRef.current += 1;
+  }, [isActive, scheduleStickyPromptMeasurement]);
+  useEffect(() => {
+    if (!isActive || !stickyPromptRowIndex) {
+      return;
+    }
+    stickyPromptMeasureGenerationRef.current += 1;
+    scheduleStickyPromptMeasurement();
+  }, [historyRows, isActive, scheduleStickyPromptMeasurement, stickyPromptRowIndex]);
+  const stickyPromptViewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 0 }), []);
   const getHistoryStartPaginationInput = useStableEvent((): HistoryStartPaginationInput => {
     const metrics = streamViewportMetricsRef.current;
     const hasMeasuredViewport =
@@ -318,6 +504,10 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     isUserScrollActiveRef.current = false;
     clearPendingUserScrollEnd();
     clearNativeViewportSettling();
+    if (stickyPromptMeasureFrameRef.current !== null) {
+      cancelAnimationFrame(stickyPromptMeasureFrameRef.current);
+      stickyPromptMeasureFrameRef.current = null;
+    }
     setIsNativeViewportSettling(false);
     historyStartReadyRef.current = false;
     const initialHistoryStartState = createHistoryStartPaginationState();
@@ -326,14 +516,26 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     const frame = requestAnimationFrame(() => {
       historyStartReadyRef.current = true;
       evaluateHistoryStart();
+      scheduleStickyPromptMeasurement();
     });
     return () => {
       cancelAnimationFrame(frame);
       clearPendingUserScrollEnd();
+      if (stickyPromptMeasureFrameRef.current !== null) {
+        cancelAnimationFrame(stickyPromptMeasureFrameRef.current);
+        stickyPromptMeasureFrameRef.current = null;
+      }
+      stickyPromptMeasureGenerationRef.current += 1;
       historyStartSettleSchedulerRef.current?.cancel();
       historyStartSettleSchedulerRef.current = null;
     };
-  }, [agentId, clearNativeViewportSettling, clearPendingUserScrollEnd, evaluateHistoryStart]);
+  }, [
+    agentId,
+    clearNativeViewportSettling,
+    clearPendingUserScrollEnd,
+    evaluateHistoryStart,
+    scheduleStickyPromptMeasurement,
+  ]);
 
   useEffect(() => () => clearNativeViewportSettling(), [clearNativeViewportSettling]);
 
@@ -395,6 +597,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     onNearBottomChange(nearBottom);
 
     evaluateHistoryStart();
+    scheduleStickyPromptMeasurement();
 
     if (
       !isUserScrollActiveRef.current &&
@@ -481,6 +684,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       viewportHeight,
     });
     evaluateHistoryStart();
+    scheduleStickyPromptMeasurement();
   });
 
   const handleContentSizeChange = useStableEvent((_width: number, height: number) => {
@@ -497,6 +701,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       contentHeight: nextContentHeight,
     });
     evaluateHistoryStart();
+    scheduleStickyPromptMeasurement();
     if (historyStartPaginationStateRef.current.status === "settling") {
       scheduleHistoryStartSettle();
     }
@@ -504,6 +709,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
 
   useEffect(() => {
     evaluateHistoryStart();
+    scheduleStickyPromptMeasurement();
     if (historyStartPaginationStateRef.current.status === "settling") {
       scheduleHistoryStartSettle();
     }
@@ -512,13 +718,18 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     hasOlderHistory,
     isLoadingOlderHistory,
     olderHistoryProgressKey,
+    scheduleStickyPromptMeasurement,
     scheduleHistoryStartSettle,
   ]);
 
   const renderItem = useStableEvent(
     ({ item, index }: ListRenderItemInfo<StreamItem>): ReactElement | null => {
       const rendered = renderHistoryMountedRow(item, index, historyItems);
-      return (rendered ?? null) as ReactElement | null;
+      return (
+        <NativeStickyPromptMeasuredRow itemId={item.id} register={registerStickyPromptRow}>
+          {rendered}
+        </NativeStickyPromptMeasuredRow>
+      );
     },
   );
 
@@ -526,9 +737,18 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     // Stable render events read the latest expansion state; this revision makes
     // the memo invoke them again when that state changes.
     void liveHeadRowRevision;
-    const liveHeadRows = segments.liveHead.map((item, index) => (
-      <Fragment key={item.id}>{renderLiveHeadRow(item, index, segments.liveHead)}</Fragment>
-    ));
+    const liveHeadRows = segments.liveHead.map((item, index) => {
+      const rendered = renderLiveHeadRow(item, index, segments.liveHead);
+      return (
+        <NativeStickyPromptMeasuredRow
+          key={item.id}
+          itemId={item.id}
+          register={registerStickyPromptRow}
+        >
+          {rendered}
+        </NativeStickyPromptMeasuredRow>
+      );
+    });
     const liveAuxiliary = renderLiveAuxiliary();
     if (
       liveHeadRows.length === 0 &&
@@ -550,6 +770,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     liveHeadRowRevision,
     renderLiveAuxiliary,
     renderLiveHeadRow,
+    registerStickyPromptRow,
     segments.liveHead,
   ]);
 
@@ -569,35 +790,40 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
   // RN's FlatList strictMode keeps its internal renderItem wrapper stable when
   // data or the live header changes, preserving the row identities above.
   return (
-    <FlatList
-      {...listInsetProps}
-      ref={flatListRef}
-      data={historyRows}
-      renderItem={renderItem}
-      keyExtractor={keyExtractor}
-      strictMode
-      testID="agent-chat-scroll"
-      nativeID="agent-chat-scroll-native-virtualized"
-      ListHeaderComponent={liveHeaderContent ?? undefined}
-      ListFooterComponent={historyFooterContent ?? undefined}
-      contentContainerStyle={listContentContainerStyle}
-      style={listStyle}
-      onLayout={handleListLayout}
-      onScroll={handleScroll}
-      onScrollBeginDrag={handleScrollBeginDrag}
-      onScrollEndDrag={handleScrollEndDrag}
-      onMomentumScrollBegin={handleMomentumScrollBegin}
-      onMomentumScrollEnd={handleMomentumScrollEnd}
-      scrollEventThrottle={16}
-      onContentSizeChange={handleContentSizeChange}
-      maintainVisibleContentPosition={maintainVisibleContentPosition}
-      initialNumToRender={12}
-      windowSize={10}
-      removeClippedSubviews={false}
-      scrollEnabled={scrollEnabled}
-      showsVerticalScrollIndicator
-      inverted
-    />
+    <View ref={viewportRootRef} style={[listStyle, nativeViewportStyle]} collapsable={false}>
+      <FlatList
+        {...listInsetProps}
+        ref={flatListRef}
+        data={historyRows}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        strictMode
+        testID="agent-chat-scroll"
+        nativeID="agent-chat-scroll-native-virtualized"
+        ListHeaderComponent={liveHeaderContent ?? undefined}
+        ListFooterComponent={historyFooterContent ?? undefined}
+        contentContainerStyle={listContentContainerStyle}
+        style={listStyle}
+        onLayout={handleListLayout}
+        onScroll={handleScroll}
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onScrollEndDrag={handleScrollEndDrag}
+        onMomentumScrollBegin={handleMomentumScrollBegin}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
+        scrollEventThrottle={16}
+        onContentSizeChange={handleContentSizeChange}
+        onViewableItemsChanged={handleStickyPromptViewableItemsChanged}
+        viewabilityConfig={stickyPromptViewabilityConfig}
+        maintainVisibleContentPosition={maintainVisibleContentPosition}
+        initialNumToRender={12}
+        windowSize={10}
+        removeClippedSubviews={false}
+        scrollEnabled={scrollEnabled}
+        showsVerticalScrollIndicator
+        inverted
+      />
+      {stickyPrompt ? <StickyPrompt {...stickyPrompt} /> : null}
+    </View>
   );
 }
 

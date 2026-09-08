@@ -109,6 +109,7 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useStreamHistoryWindow } from "./use-stream-history-window";
 import { PluginTimelineItemView, useInstalledTimelineTransform } from "@/plugins/timeline";
 import { projectPluginTimelineItems } from "@/plugins/timeline/projection";
+import { createStickyPromptPublisher, type StickyPromptItem } from "./sticky-prompt/model";
 
 function renderLiveAuxiliaryNode(input: {
   pendingPermissions: ReactNode;
@@ -352,6 +353,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
     const toolCallDetailLevel = useSettings((settings) => settings.toolCallDetailLevel);
     const chatOutlineEnabled = useSettings((settings) => settings.chatOutlineEnabled);
+    const [stickyPromptSource] = useState(createStickyPromptPublisher);
     const viewportRef = useRef<StreamViewportHandle | null>(null);
     const pendingClientMessageIds = useMemo(
       () => new Set(pendingMessageSubmissions.map((submission) => submission.clientMessageId)),
@@ -434,10 +436,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       : FadeOut.duration(200);
 
     useEffect(() => {
+      stickyPromptSource.publish(null);
       setIsNearBottom(true);
       setExpandedInlineToolCallIds(new Set());
       setExpandedToolCallGroupIds(new Set());
-    }, [agentId]);
+    }, [agentId, stickyPromptSource]);
 
     const handleInlinePathPress = useStableEvent(
       (target: InlinePathTarget, disposition: OpenFileDisposition) => {
@@ -565,6 +568,24 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         head: projectPluginTimelineItems(projectedToolCalls.head, transformTimelineItem),
       }),
       [projectedToolCalls.head, projectedToolCalls.tail, transformTimelineItem],
+    );
+    const stickyPromptItems = useMemo<StickyPromptItem[]>(() => {
+      const itemsById = new Map<string, StickyPromptItem>();
+      for (const item of [...effectiveStreamItems, ...(effectiveStreamHead ?? EMPTY_STREAM_HEAD)]) {
+        if (item.kind !== "user_message") {
+          continue;
+        }
+        itemsById.set(item.id, { id: item.id, text: item.text });
+      }
+      return [...itemsById.values()];
+    }, [effectiveStreamHead, effectiveStreamItems]);
+    const stickyPrompt = useMemo(
+      () => ({
+        items: stickyPromptItems,
+        source: stickyPromptSource,
+        isMobileBreakpoint: isMobile,
+      }),
+      [isMobile, stickyPromptItems, stickyPromptSource],
     );
     const {
       start: historyWindowStart,
@@ -1104,6 +1125,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               isAuthoritativeHistoryReady,
               onNearBottomChange: setIsNearBottom,
               onReadingPositionChange: chatOutline.reportReadingPosition,
+              stickyPrompt,
               onNearHistoryStart: loadOlder,
               isLoadingOlderHistory: isLoadingOlder,
               hasOlderHistory: hasOlder,
