@@ -9,7 +9,9 @@ This doc owns the policy. Current pins live in
 [`.paseo-integration/manifest.json`](../.paseo-integration/manifest.json). The
 portable skill
 [`.agents/skills/paseo-integration-maintenance`](../.agents/skills/paseo-integration-maintenance/SKILL.md)
-orchestrates the work and points here.
+orchestrates the consume work and points here. The optional custom build and
+install path is documented in
+[`.agents/skills/paseo-integration-build`](../.agents/skills/paseo-integration-build/SKILL.md).
 
 Do not merge `integration/dev` into any `feat/*` branch. Do not open an
 upstream pull request from `integration/dev`.
@@ -158,16 +160,19 @@ Required gates, in order:
    `origin/main` that is already an ancestor of `HEAD`. Official origin must
    be the getpaseo/paseo remote. Fail if `origin/main` is missing or no such
    ancestor exists.
-2. **Build.** Future stage. Do not run a package build as part of a consume.
-3. **Install.** Future stage. A later custom install must not restart the
-   daemon on port 6767.
-4. **Rollback.** Future stage. Record the last known-good `integration/dev`
-   commit and installed artifact before a later install; restore those, not
-   an unpinned ref.
+2. **Build.** Do not run a package build as part of a consume. An explicitly
+   requested custom build follows
+   [`paseo-integration-build`](../.agents/skills/paseo-integration-build/SKILL.md).
+3. **Install.** Do not install as part of a consume. An install requires
+   explicit user authorization and must verify the systemd worktree before
+   restarting the daemon on port `6767`.
+4. **Rollback.** Record the last known-good `integration/dev` commit and
+   installed artifact before an authorized install; restore those, not an
+   unpinned ref. The build skill owns the record and verification sequence.
 
 Fail closed on a dirty tree for any mutating step. Do not auto-stash, reset,
-rebase, or force-push. Build, install, and rollback commands do not exist
-yet; do not invent them.
+rebase, or force-push. The optional custom build and install commands live in
+the dedicated build skill and are not part of consume completion.
 
 ## Manifest
 
@@ -188,4 +193,5 @@ changes.
 | Consume (owned or external) | The exact head is merged, the manifest pin matches, verify gates pass, and semantic review is done. Build and install are not part of consume completion. |
 | Official release update     | The new stable tag and commit are the baseline, the ceiling is consistent, leftover feature pins still account for themselves, and verify gates pass.     |
 | Reconciliation              | The old head is no longer required, the replacement is recorded, and the tree does not carry a duplicate conflicting copy.                                |
-| This documentation slice    | Policy, skill, adapter symlink, and manifest exist. No build or install.                                                                                  |
+| Custom build/install        | The dedicated build skill verifies dependencies, artifacts, service ownership, runtime version, relay, and rollback data before reporting completion.     |
+| This documentation slice    | Policy, consume skill, build skill, adapter symlink, and manifest remain separate responsibilities.                                                       |
