@@ -32,7 +32,7 @@ import {
   AssistantMessage,
   SpeakMessage,
   UserMessage,
-  ActivityLog,
+  Notification,
   ToolCall,
   TodoListCard,
   CompactionMarker,
@@ -113,7 +113,8 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { projectCompletedResponseFolds } from "./completed-response-fold";
 import { CompletedResponseFoldRow } from "./completed-response-fold-row";
 import { useStreamHistoryWindow } from "./use-stream-history-window";
-import { PluginTimelineItemView } from "@/plugins/timeline";
+import { PluginTimelineItemView, useInstalledTimelineTransform } from "@/plugins/timeline";
+import { projectPluginTimelineItems } from "@/plugins/timeline/projection";
 
 function renderLiveAuxiliaryNode(input: {
   pendingPermissions: ReactNode;
@@ -389,6 +390,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     // Get serverId (fallback to agent's serverId if not provided)
     const resolvedServerId = serverId ?? context.serverId ?? "";
+    const transformTimelineItem = useInstalledTimelineTransform(resolvedServerId);
 
     const client = useSessionStore((state) => state.sessions[resolvedServerId]?.client ?? null);
     const sessionStreamHead = useSessionStore((state) =>
@@ -572,6 +574,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         toolCallDetailLevel,
       ],
     );
+    const projectedPlugins = useMemo(
+      () => ({
+        tail: projectPluginTimelineItems(projectedToolCalls.tail, transformTimelineItem),
+        head: projectPluginTimelineItems(projectedToolCalls.head, transformTimelineItem),
+      }),
+      [projectedToolCalls.head, projectedToolCalls.tail, transformTimelineItem],
+    );
     const {
       start: historyWindowStart,
       hasLocalHistory,
@@ -579,7 +588,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       loadOlder,
     } = useStreamHistoryWindow({
       agentId,
-      items: projectedToolCalls.tail,
+      items: projectedPlugins.tail,
       loadRemoteOlder,
     });
     const isLoadingOlder = remoteIsLoadingOlder;
@@ -588,16 +597,16 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const mountedToolCallTail = useMemo(
       () =>
         historyWindowStart > 0
-          ? projectedToolCalls.tail.slice(historyWindowStart)
-          : projectedToolCalls.tail,
-      [historyWindowStart, projectedToolCalls.tail],
+          ? projectedPlugins.tail.slice(historyWindowStart)
+          : projectedPlugins.tail,
+      [historyWindowStart, projectedPlugins.tail],
     );
     const completedResponseProjection = useMemo(
       () =>
         projectCompletedResponseFolds({
           enabled: collapseCompletedResponses,
           tail: mountedToolCallTail,
-          head: projectedToolCalls.head,
+          head: projectedPlugins.head,
           isTurnActive,
           expandedResponseIds: expandedCompletedResponseIds,
           preserveLeadingResponse: hasOlder,
@@ -609,7 +618,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         hasOlder,
         isTurnActive,
         mountedToolCallTail,
-        projectedToolCalls.head,
+        projectedPlugins.head,
         projectedToolCalls.groupsByHostId,
       ],
     );
@@ -947,15 +956,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             content = renderToolCallItem(layoutItem, item);
             break;
 
-          case "activity_log":
-            content = (
-              <ActivityLog
-                type={item.activityType}
-                message={item.message}
-                timestamp={item.timestamp.getTime()}
-                metadata={item.metadata}
-              />
-            );
+          case "notification":
+            content = <Notification level={item.level} message={item.message} />;
             break;
 
           case "todo_list":

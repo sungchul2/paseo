@@ -10,10 +10,12 @@ export const ja: TranslationResources = {
       cancel: "キャンセル",
       close: "閉じる",
       copy: "コピー",
+      copyLine: "行をコピー",
       dismiss: "閉じる",
       retry: "再試行",
       search: "検索",
       select: "選択",
+      selectAll: "すべて選択",
     },
     placeholders: {
       search: "検索...",
@@ -33,6 +35,7 @@ export const ja: TranslationResources = {
     errors: {
       error: "エラー",
       unableToSave: "保存できません",
+      unableToCopy: "コピーできません",
       nameRequired: "名前は必須です",
       daemonUnavailable: "デーモンが利用できません",
       daemonClientUnavailable: "デーモンクライアントが利用できません",
@@ -298,6 +301,7 @@ export const ja: TranslationResources = {
       zoomIn: "拡大",
       zoomOut: "縮小",
       resetZoom: "表示をリセット",
+      fullscreen: "全画面表示",
       viewSource: "ソースを表示",
       viewDiagram: "図を表示",
     },
@@ -369,7 +373,13 @@ export const ja: TranslationResources = {
     },
   },
   importSession: {
+    chooseHostTitle: en.importSession.chooseHostTitle,
     title: "セッションをインポート",
+    searchPlaceholder: "セッションを検索...",
+    scope: {
+      host: "{{host}} のセッション",
+      workspace: "このワークスペース",
+    },
     filters: {
       all: "すべて",
     },
@@ -378,12 +388,13 @@ export const ja: TranslationResources = {
       updateHost: "セッションをインポートするにはホストを更新してください。",
       noProviders: "インポート可能なプロバイダーが有効になっていません。",
       loading: "最近のセッションを読み込み中...",
-      failedAll: "最近のセッションを読み込めませんでした。",
-      failedProviders: "{{providers}}のセッションを読み込めませんでした。",
+      failedProvider: "{{provider}} のセッションを読み込めませんでした",
       failedImport: "選択したセッションをインポートできませんでした。",
     },
     actions: {
       refresh: "セッションを更新",
+      showAll: "すべて表示",
+      loadMore: "さらに読み込む",
     },
     preview: {
       untitledSession: "無題のセッション",
@@ -391,6 +402,7 @@ export const ja: TranslationResources = {
     },
     empty: {
       noRecent: "インポートする最近のセッションがありません。",
+      noMatches: "検索に一致するセッションがありません。",
       alreadyImported: "最近のセッションはすでにすべてインポートされています。",
       noProviderSessions: "{{provider}}のセッションが見つかりません。",
     },
@@ -504,14 +516,23 @@ export const ja: TranslationResources = {
         completed: "セットアップ完了",
         failed: "セットアップ失敗",
         workspace: "ワークスペースセットアップ",
+        blocked: "セットアップはブロックされました",
       },
       status: {
         running: "実行中",
         completed: "完了",
         failed: "失敗",
         waiting: "セットアップ出力を待機中",
+        blocked: "ブロック済み",
       },
       waiting: "ワークスペースをセットアップ中...",
+      blocked: {
+        title: "セットアップは実行されませんでした",
+        description:
+          "このPRは別のリポジトリ {{repository}} からのものです。セットアップとスクリプトは未確認のコードを実行する可能性があります。",
+        run: "セットアップを実行",
+        runFailed: "ワークスペースのセットアップに失敗しました",
+      },
       empty: {
         noCommands: "このワークスペースでセットアップコマンドは実行されませんでした。",
       },
@@ -900,11 +921,8 @@ export const ja: TranslationResources = {
         refresh: "更新",
         refreshState: "gitと{{brand}}の状態を更新",
         failedRefresh: "gitの状態の更新に失敗しました。",
-        emptyHiddenWhitespace: "空白を非表示にすると変更は表示されません",
-        emptyUncommitted: "未コミットの変更なし",
         seeUncommittedChanges: "未コミットの変更を表示",
         seeCommittedChanges: "コミット済みの変更を表示",
-        emptyAgainstBase: "{{baseRef}}との差分なし",
         checkingRepository: "リポジトリを確認中...",
         notRepository: "gitリポジトリではありません",
         diffMode: "差分モード",
@@ -1044,6 +1062,16 @@ export const ja: TranslationResources = {
       updateHost: "ラベルを管理するにはホストを更新してください。",
     },
   },
+  changelog: {
+    title: "新着情報",
+    installed: "インストール済み",
+    showMore: "もっと見る",
+    openWebsite: "変更履歴をすべて表示",
+    error: {
+      title: "変更履歴を読み込めません",
+      description: "接続を確認してもう一度お試しください。",
+    },
+  },
   sidebar: {
     display: {
       trigger: "表示設定",
@@ -1103,7 +1131,6 @@ export const ja: TranslationResources = {
       addProject: "プロジェクトを追加",
       newWorkspace: "新しいワークスペース",
       hosts: "ホスト",
-      home: "ホーム",
       settings: "設定",
       closeSidebar: "サイドバーを閉じる",
     },
@@ -1120,6 +1147,7 @@ export const ja: TranslationResources = {
     },
     sections: {
       sessions: "履歴",
+      search: "検索",
       schedules: "スケジュール",
     },
     worktreeSetup: {
@@ -2085,6 +2113,7 @@ export const ja: TranslationResources = {
     about: {
       title: "アプリ情報",
       appVersion: "アプリバージョン",
+      whatsNewHint: "各バージョンのリリースノート",
       thisDevice: "このデバイス",
       connectedHosts: "接続されているホスト",
       offline: "オフライン",
@@ -2131,6 +2160,12 @@ export const ja: TranslationResources = {
       chatOutline: {
         title: "チャットのアウトライン",
         description: "プロンプト間を移動するためのアウトラインを表示します",
+      },
+      sidebar: {
+        title: "サイドバー",
+        description: "サイドバー上部に表示する項目とその順序を選択します",
+        moveUp: "上に移動",
+        moveDown: "下に移動",
       },
       fonts: {
         title: "フォント",

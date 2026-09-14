@@ -62,7 +62,7 @@ function isProtectedPresentationItem(item: StreamItem): boolean {
   if (item.kind === "user_message") {
     return true;
   }
-  if (item.kind === "activity_log" && item.activityType === "error") {
+  if (item.kind === "notification" && item.level === "error") {
     return true;
   }
   return item.kind === "tool_call" && isToolCallRunning(item);

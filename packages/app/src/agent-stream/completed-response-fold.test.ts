@@ -280,10 +280,11 @@ describe("projectCompletedResponseFolds", () => {
 
   it("keeps response-level errors and still-running tools visible around a collapsed response", () => {
     const error: StreamItem = {
-      kind: "activity_log",
+      kind: "notification",
+      sourceType: "error",
       id: "error",
       turnId: "turn-1",
-      activityType: "error",
+      level: "error",
       message: "Provider disconnected",
       timestamp: at(4),
     };
@@ -334,9 +335,10 @@ describe("projectCompletedResponseFolds", () => {
 
   it("anchors trailing informational activity above the final answer", () => {
     const activity: StreamItem = {
-      kind: "activity_log",
+      kind: "notification",
+      sourceType: "notification",
       id: "activity",
-      activityType: "info",
+      level: "info",
       message: "Usage updated",
       timestamp: at(3),
     };
