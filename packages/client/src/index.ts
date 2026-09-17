@@ -468,7 +468,17 @@ export interface PaseoConfigActions {
   ): Promise<{ requestId: string; config: MutableDaemonConfig }>;
 }
 
+/**
+ * Host capabilities advertised on the latest `server_info` status.
+ * Each field is a live getter over `DaemonClient.getLastServerInfoMessage()`.
+ * Missing/older servers and a cleared post-disconnect snapshot both read false.
+ */
+export interface PaseoHostFeatures {
+  readonly agentDeliveryOffer: boolean;
+}
+
 export interface PaseoApi {
+  readonly features: PaseoHostFeatures;
   readonly terminals: PaseoTerminalActions;
   readonly workspaces: PaseoWorkspaceActions;
   readonly projects: PaseoProjectActions;
@@ -497,6 +507,14 @@ export function createPaseoClient(config: PaseoClientConfig): PaseoClient {
     ensureConnected: () => daemonClient.ensureConnected(),
     getConnectionState: () => daemonClient.getConnectionState(),
   };
+}
+
+function createHostFeatures(daemonClient: DaemonClient): PaseoHostFeatures {
+  return Object.freeze({
+    get agentDeliveryOffer() {
+      return daemonClient.getLastServerInfoMessage()?.features?.agentDeliveryOffer === true;
+    },
+  });
 }
 
 export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
@@ -535,6 +553,7 @@ export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
   const createWorkspaceHandle = createWorkspaceHandleFactory(daemonClient, createAgent, terminals);
 
   return {
+    features: createHostFeatures(daemonClient),
     terminals,
     projects: {
       list: (options) => daemonClient.listProjects(options),

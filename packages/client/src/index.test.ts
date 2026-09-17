@@ -231,11 +231,13 @@ test("createPaseoApi borrows daemon capabilities without exposing connection own
   expect(Object.keys(paseo).sort()).toEqual([
     "agents",
     "config",
+    "features",
     "projects",
     "providers",
     "terminals",
     "workspaces",
   ]);
+  expect(paseo.features.agentDeliveryOffer).toBe(false);
   expect("connect" in paseo).toBe(false);
   expect("close" in paseo).toBe(false);
   expect("skills" in paseo.agents).toBe(false);
@@ -1545,4 +1547,172 @@ test("agent config requires provider/model syntax", async () => {
   ).rejects.toThrow('Expected config.provider in "provider/model" format');
 
   await client.close();
+});
+
+function createLiveFeatureHost(featureQueue: Array<Record<string, boolean> | null>) {
+  const sent: Array<{ type?: string; message?: { type?: string; requestId?: string } }> = [];
+  let receive = (_data: unknown) => {};
+  let open = () => {};
+  let closed = (_event?: unknown) => {};
+  const daemonClient = new DaemonClient({
+    url: "ws://daemon.test",
+    clientId: "host-features",
+    reconnect: { enabled: false },
+    transportFactory: () => {
+      const features = featureQueue.shift();
+      return {
+        send(data: string | Uint8Array) {
+          const frame = JSON.parse(String(data)) as {
+            type?: string;
+            message?: { type?: string; requestId?: string };
+          };
+          sent.push(frame);
+          if (frame.type === "hello") {
+            receive(
+              JSON.stringify({
+                type: "session",
+                message: {
+                  type: "status",
+                  payload: {
+                    status: "server_info",
+                    serverId: "srv_features",
+                    hostname: null,
+                    version: null,
+                    ...(features === null ? {} : { features }),
+                  },
+                },
+              }),
+            );
+          }
+        },
+        close() {},
+        onMessage(handler: (data: unknown) => void) {
+          receive = handler;
+          return () => {};
+        },
+        onOpen(handler: () => void) {
+          open = handler;
+          return () => {};
+        },
+        onClose(handler: (event?: unknown) => void) {
+          closed = handler;
+          return () => {};
+        },
+        onError() {
+          return () => {};
+        },
+      };
+    },
+  });
+  return {
+    daemonClient,
+    api: createPaseoApi(daemonClient),
+    sent,
+    async connect() {
+      const ready = daemonClient.connect();
+      open();
+      await ready;
+    },
+    disconnect() {
+      closed({ code: 1006, reason: "lost" });
+    },
+    receiveSession(message: object) {
+      receive(JSON.stringify({ type: "session", message }));
+    },
+  };
+}
+
+test("createPaseoApi features.agentDeliveryOffer tracks live server_info and cannot stale-enable", async () => {
+  const host = createLiveFeatureHost([{ agentDeliveryOffer: true }, {}, null]);
+  expect(host.api.features.agentDeliveryOffer).toBe(false);
+  expect(Object.getOwnPropertyDescriptor(host.api.features, "agentDeliveryOffer")?.get).toEqual(
+    expect.any(Function),
+  );
+
+  await host.connect();
+  expect(host.api.features.agentDeliveryOffer).toBe(true);
+
+  host.disconnect();
+  expect(host.api.features.agentDeliveryOffer).toBe(false);
+
+  await host.connect();
+  expect(host.api.features.agentDeliveryOffer).toBe(false);
+
+  host.disconnect();
+  await host.connect();
+  expect(host.api.features.agentDeliveryOffer).toBe(false);
+
+  await host.daemonClient.close();
+});
+
+test("createPaseoApi spread keeps a live features getter from server_info", async () => {
+  const host = createLiveFeatureHost([{ agentDeliveryOffer: true }]);
+  const spread = { ...createPaseoApi(host.daemonClient) };
+  expect(spread.features.agentDeliveryOffer).toBe(false);
+  await host.connect();
+  expect(spread.features.agentDeliveryOffer).toBe(true);
+  expect(host.api.features.agentDeliveryOffer).toBe(true);
+  host.disconnect();
+  expect(spread.features.agentDeliveryOffer).toBe(false);
+  expect(host.api.features.agentDeliveryOffer).toBe(false);
+  await host.daemonClient.close();
+});
+
+test("createPaseoClient exposes the same live features bag as createPaseoApi", async () => {
+  const client = createPaseoClient({
+    url: "ws://127.0.0.1:9/ws",
+    reconnect: { enabled: false },
+  });
+  try {
+    expect(client.features.agentDeliveryOffer).toBe(false);
+    expect(Object.getOwnPropertyDescriptor(client.features, "agentDeliveryOffer")?.get).toEqual(
+      expect.any(Function),
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+test("offerWhenIdle uses the delivery-offer RPC and does not send()", async () => {
+  const host = createLiveFeatureHost([{ agentDeliveryOffer: true }]);
+  await host.connect();
+  expect(host.api.features.agentDeliveryOffer).toBe(true);
+  expect(typeof host.api.agents.ref("agent-1").offerWhenIdle).toBe("function");
+
+  const offer = host.api.agents.ref("agent-1").offerWhenIdle("continue", { messageId: "wake-1" });
+  const request = host.sent.find((frame) => frame.message?.type === "agent.delivery.offer.request");
+  expect(request).toMatchObject({
+    type: "session",
+    message: {
+      type: "agent.delivery.offer.request",
+      agentId: "agent-1",
+      text: "continue",
+      messageId: "wake-1",
+    },
+  });
+  expect(host.sent.some((frame) => frame.message?.type === "send_agent_message_request")).toBe(
+    false,
+  );
+
+  host.receiveSession({
+    type: "agent.delivery.offer.response",
+    payload: {
+      requestId: request?.message?.requestId,
+      agentId: "agent-1",
+      status: "deferred",
+      deferral: "pending_permission",
+      error: null,
+    },
+  });
+  await expect(offer).resolves.toEqual({
+    agentId: "agent-1",
+    status: "deferred",
+    deferral: "pending_permission",
+    error: null,
+  });
+  expect(host.sent.some((frame) => frame.message?.type === "send_agent_message_request")).toBe(
+    false,
+  );
+
+  await host.daemonClient.close();
 });
