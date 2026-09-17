@@ -9,7 +9,11 @@ import type { ProviderEvent, ProviderRegistration } from "@getpaseo/plugin/serve
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentStreamEvent } from "../agent/agent-sdk-types.js";
 import { PluginAgentClientRegistry } from "../agent/plugin-provider.js";
-import { PluginRuntime } from "./runtime.js";
+import {
+  PluginRuntime,
+  formatPluginInitializationExitError,
+  pluginChildEnvironment,
+} from "./runtime.js";
 import type { PluginSessionSocket } from "./session-socket.js";
 
 const temporaryDirectories: string[] = [];
@@ -1773,5 +1777,94 @@ export default function contribute(plugin: any) {
     await expect(runtime.invoke("crashing", "anything", {})).rejects.toThrow(
       "Plugin is not available",
     );
+  });
+
+  it("strips inherited daemon identity from plugin child env", () => {
+    const env = pluginChildEnvironment({
+      PATH: "/usr/bin",
+      PASEO_HOME: "/tmp/isolated-paseo-home",
+      PASEO_AGENT_ID: "live-agent",
+      PASEO_AGENT_CWD: "/tmp/live",
+      PASEO_WORKSPACE_ID: "wks_live",
+      PASEO_CALLER_AGENT_ID: "caller",
+      PASEO_SESSION_ID: "session",
+      PASEO_HOST: "127.0.0.1:6767",
+      PASEO_LISTEN: "127.0.0.1:6767",
+      PASEO_PASSWORD: "secret",
+      PASEO_HUB_TOKEN: "hub",
+      PASEO_WATCHDOG_ALLOW_UNSAFE_WAKE: "1",
+    });
+    expect(env.PASEO_HOME).toBe("/tmp/isolated-paseo-home");
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.PASEO_AGENT_ID).toBeUndefined();
+    expect(env.PASEO_AGENT_CWD).toBeUndefined();
+    expect(env.PASEO_WORKSPACE_ID).toBeUndefined();
+    expect(env.PASEO_CALLER_AGENT_ID).toBeUndefined();
+    expect(env.PASEO_SESSION_ID).toBeUndefined();
+    expect(env.PASEO_HOST).toBeUndefined();
+    expect(env.PASEO_LISTEN).toBeUndefined();
+    expect(env.PASEO_PASSWORD).toBeUndefined();
+    expect(env.PASEO_HUB_TOKEN).toBeUndefined();
+    expect(env.PASEO_WATCHDOG_ALLOW_UNSAFE_WAKE).toBeUndefined();
+  });
+
+  it("formats captured plugin stderr onto initialization-exit errors", () => {
+    const error = formatPluginInitializationExitError("delivery-advertised", [
+      {
+        sequence: 1,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        stream: "stderr",
+        message: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module",
+      },
+    ]);
+    expect(error.message).toContain("Plugin delivery-advertised exited during initialization");
+    expect(error.message).toContain("[stderr] Error [ERR_MODULE_NOT_FOUND]: Cannot find module");
+  });
+
+  it("includes captured stderr when the plugin child exits before ready", async () => {
+    const directory = await createPlugin(
+      "init-exit",
+      `export default function contribute() { return () => undefined; }`,
+    );
+    const listeners = new Map<string, Array<(message: never) => void>>();
+    const emit = (event: string, message: unknown) => {
+      for (const listener of listeners.get(event) ?? []) listener(message as never);
+    };
+    const child = {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      connected: true,
+      killed: false,
+      send(message: { type: string }, callback?: (error: Error | null) => void) {
+        callback?.(null);
+        if (message.type === "initialize") {
+          this.stderr.write(
+            "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@getpaseo/client'\n",
+          );
+          queueMicrotask(() => emit("close", null));
+        }
+        return true;
+      },
+      kill() {
+        this.killed = true;
+        this.connected = false;
+        queueMicrotask(() => emit("close", null));
+        return true;
+      },
+      disconnect() {
+        this.connected = false;
+      },
+      on(event: string, listener: (message: never) => void) {
+        const registered = listeners.get(event) ?? [];
+        registered.push(listener);
+        listeners.set(event, registered);
+        return this;
+      },
+    };
+    const runtime = createTestRuntime({ spawnChild: () => child });
+    await expect(runtime.startPlugin("init-exit", directory)).rejects.toThrow(
+      /Plugin init-exit exited during initialization[\s\S]*ERR_MODULE_NOT_FOUND/,
+    );
+    await runtime.stopAll();
   });
 });

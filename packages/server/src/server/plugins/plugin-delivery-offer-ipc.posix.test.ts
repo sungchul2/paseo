@@ -1,8 +1,25 @@
+/**
+ * Real plugin-process IPC for PaseoApi.features.agentDeliveryOffer.
+ *
+ * plugin-process imports `@getpaseo/client` from worktree `packages/client/dist`,
+ * not TypeScript source. Without that dist the child exits during initialization.
+ *
+ * Setup from this worktree root (no extra env required; plugin children strip
+ * inherited PASEO_AGENT_* / listen identity themselves):
+ *
+ *   npx tsc -p packages/protocol/tsconfig.json --incremental false
+ *   npx tsc -p packages/client/tsconfig.json --incremental false
+ *   cd packages/server
+ *   npm exec --no -- vitest run src/server/plugins/plugin-delivery-offer-ipc.posix.test.ts --maxWorkers=1
+ *
+ * Do not symlink this worktree's client/cli node_modules onto live integration-dev.
+ */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
 import { afterEach, expect, it } from "vitest";
+import { requireWorktreeClientDist } from "./require-worktree-client-dist.js";
 import { PluginRuntime } from "./runtime.js";
 import type { PluginSessionSocket } from "./session-socket.js";
 
@@ -143,6 +160,7 @@ export default function contribute(server) {
 }`;
 
 it("plugin IPC sees injected PaseoApi.features from server_info and offerWhenIdle without send", async () => {
+  requireWorktreeClientDist();
   const advertised = createSessionHost({
     advertiseDeliveryOffer: true,
     offerStatus: "deferred",

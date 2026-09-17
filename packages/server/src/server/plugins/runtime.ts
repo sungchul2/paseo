@@ -204,11 +204,54 @@ function resolveWorkerExecArgv(): string[] {
   ];
 }
 
+const PLUGIN_CHILD_STRIP_EXACT = new Set([
+  "PASEO_AGENT_ID",
+  "PASEO_AGENT_CWD",
+  "PASEO_WORKSPACE_ID",
+  "PASEO_PARENT_AGENT_ID",
+  "PASEO_CALLER_AGENT_ID",
+  "PASEO_SESSION_ID",
+  "PASEO_HOST",
+  "PASEO_LISTEN",
+  "PASEO_PASSWORD",
+  "PASEO_WATCHDOG_ALLOW_UNSAFE_WAKE",
+]);
+
+/**
+ * Plugin workers talk to the host over IPC. They must not inherit the
+ * launching agent's session identity or a live listen/password target, or
+ * isolated tests (and nested daemons) can handshake the wrong session.
+ */
+export function pluginChildEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...source };
+  for (const key of Object.keys(env)) {
+    if (
+      PLUGIN_CHILD_STRIP_EXACT.has(key) ||
+      key.startsWith("PASEO_CALLER") ||
+      key.startsWith("PASEO_SESSION") ||
+      key.startsWith("PASEO_HUB")
+    ) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
+export function formatPluginInitializationExitError(
+  pluginId: string,
+  logs: readonly PluginLogEntry[],
+  reason = `Plugin ${pluginId} exited during initialization`,
+): Error {
+  const lines = logs.map((entry) => `[${entry.stream}] ${entry.message}`);
+  return new Error(lines.length > 0 ? `${reason}\n${lines.join("\n")}` : reason);
+}
+
 function spawnPluginChild(): PluginChild {
   return fork(fileURLToPath(resolveWorkerUrl()), [], {
     execArgv: resolveWorkerExecArgv(),
     serialization: "advanced",
     stdio: ["ignore", "pipe", "pipe", "ipc"],
+    env: pluginChildEnvironment(),
   }) as PluginChild;
 }
 
@@ -579,16 +622,20 @@ export class PluginRuntime {
       ready = await new Promise<Extract<PluginProcessMessage, { type: "ready" }>>(
         (resolve, reject) => {
           let settled = false;
-          const timeout = setTimeout(
-            () => fail(new Error(`Plugin ${pluginId} did not initialize`)),
-            REQUEST_TIMEOUT_MS,
-          );
+          let timeout: ReturnType<typeof setTimeout>;
           const fail = (error: Error): void => {
             if (settled) return;
             settled = true;
             clearTimeout(timeout);
             reject(error);
           };
+          const failWithLogs = (reason: string): void => {
+            fail(formatPluginInitializationExitError(pluginId, this.getLogs(pluginId), reason));
+          };
+          timeout = setTimeout(
+            () => failWithLogs(`Plugin ${pluginId} did not initialize`),
+            REQUEST_TIMEOUT_MS,
+          );
           child.on("message", (rawMessage) => {
             const parsed = PluginProcessMessageSchema.safeParse(rawMessage);
             if (!parsed.success) {
@@ -610,7 +657,7 @@ export class PluginRuntime {
               clearTimeout(timeout);
               resolve(message);
             } else if (message.type === "fatal") {
-              fail(new Error(message.error));
+              failWithLogs(message.error);
             } else if (loaded) {
               this.handleChildMessage(loaded, message);
             }
@@ -618,7 +665,7 @@ export class PluginRuntime {
           child.on("close", () => {
             sessionSocket.peerClosed();
             if (!loaded) {
-              fail(new Error(`Plugin ${pluginId} exited during initialization`));
+              failWithLogs(`Plugin ${pluginId} exited during initialization`);
               return;
             }
             void this.handleChildClose(loaded);
