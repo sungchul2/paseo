@@ -32,6 +32,17 @@
       "status": "open",
       "open": true,
       "url": "https://github.com/getpaseo/paseo/pull/3588"
+    },
+    {
+      "number": 39740,
+      "owner": "sungchul2",
+      "repo": "paseo",
+      "ref": "feat/agent-delivery-offer",
+      "head": "7e04238b88504ef7c9e030a4968607cbb65fb375",
+      "role": "owned",
+      "status": "open",
+      "open": true,
+      "url": "https://github.com/sungchul2/paseo/commit/7e04238b88504ef7c9e030a4968607cbb65fb375"
     }
   ],
   "verificationGates": {
