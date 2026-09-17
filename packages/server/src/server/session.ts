@@ -259,6 +259,11 @@ import {
 import { archiveByScope, type ActiveWorkspaceRef } from "./workspace-archive-service.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { SessionAuthorization, type DaemonPermission } from "./authorization/index.js";
+import {
+  resolveDaemonDeliveryOfferer,
+  type AgentDeliveryOfferer,
+  type DeliveryOfferResult,
+} from "./agent/delivery-offer.js";
 
 function resolveWorkspaceSetupRuntime(
   runtime: WorkspaceSetupRuntime | undefined,
@@ -474,6 +479,7 @@ export interface SessionOptions {
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
   watchdogService?: WatchdogService;
+  deliveryOffers?: AgentDeliveryOfferer;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
   createAgentMcpTransport?: AgentMcpTransportFactory;
@@ -692,6 +698,7 @@ export class Session {
 
   private agentManager: AgentManager;
   private readonly agentStorage: AgentStorage;
+  private readonly deliveryOffers: AgentDeliveryOfferer;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly directorySync: DirectorySyncService;
@@ -864,6 +871,13 @@ export class Session {
     });
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
+    this.deliveryOffers = resolveDaemonDeliveryOfferer(
+      paseoHome,
+      agentManager,
+      agentStorage,
+      this.sessionLogger,
+      options.deliveryOffers,
+    );
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
     this.directorySync = resolveDirectorySync(directorySync);
@@ -2017,6 +2031,7 @@ export class Session {
     const promise =
       this.dispatchVoiceAndControlMessage(msg) ??
       this.dispatchAgentRewindMessage(msg, source) ??
+      this.dispatchAgentDeliveryMessage(msg) ??
       this.dispatchAgentRelationshipMessage(msg) ??
       this.dispatchAgentTimelineMessage(msg, source) ??
       this.dispatchHubExecutionMessage(msg) ??
@@ -2323,6 +2338,15 @@ export class Session {
     switch (msg.type) {
       case "agent.rewind.request":
         return this.handleAgentRewindRequest(msg, source);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchAgentDeliveryMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "agent.delivery.offer.request":
+        return this.handleAgentDeliveryOfferRequest(msg);
       default:
         return undefined;
     }
@@ -4110,6 +4134,44 @@ export class Session {
       } else {
         this.handleAgentRunError(agentId, error, "Failed to cancel running agent on request");
       }
+    }
+  }
+
+  private async handleAgentDeliveryOfferRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.delivery.offer.request" }>,
+  ): Promise<void> {
+    const emit = (agentId: string, result: DeliveryOfferResult) => {
+      this.emit({
+        type: "agent.delivery.offer.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId,
+          status: result.status,
+          deferral: result.deferral,
+          error: result.error,
+        },
+      });
+    };
+    const resolved = await this.resolveAgentIdentifier(msg.agentId);
+    if (!resolved.ok) {
+      emit(msg.agentId, { status: "rejected", deferral: null, error: resolved.error });
+      return;
+    }
+    try {
+      emit(
+        resolved.agentId,
+        await this.deliveryOffers.offer({
+          agentId: resolved.agentId,
+          text: msg.text,
+          messageId: msg.messageId,
+        }),
+      );
+    } catch (error) {
+      emit(resolved.agentId, {
+        status: "rejected",
+        deferral: null,
+        error: errorToFriendlyMessage(error),
+      });
     }
   }
 

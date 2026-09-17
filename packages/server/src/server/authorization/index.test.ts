@@ -79,6 +79,7 @@ describe("SessionAuthorization", () => {
     for (const type of [
       "create_agent_request",
       "send_agent_message_request",
+      "agent.delivery.offer.request",
       "fetch_agent_request",
       "agent.timeline.set_subscription.request",
       "workspace.recovery.inspect.request",
@@ -91,6 +92,7 @@ describe("SessionAuthorization", () => {
       "agent_update",
       "agent_stream",
       "send_agent_message_response",
+      "agent.delivery.offer.response",
       "workspace.recovery.restore.response",
     ] as const) {
       expect(authorization.allowsOutbound(outboundMessage(type))).toBe(true);

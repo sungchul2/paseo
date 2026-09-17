@@ -315,6 +315,59 @@ describe("agent detach RPC", () => {
     expect(parsed.type).toBe("agent.detach.response");
   });
 
+  test("parses agent.delivery.offer request and response", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "agent.delivery.offer.request",
+      requestId: "offer-1",
+      agentId: "agent-1",
+      text: "continue",
+      messageId: "wake-1",
+    });
+    const response = SessionOutboundMessageSchema.parse({
+      type: "agent.delivery.offer.response",
+      payload: {
+        requestId: "offer-1",
+        agentId: "agent-1",
+        status: "deferred",
+        deferral: "pending_permission",
+        error: null,
+      },
+    });
+
+    expect(request).toEqual({
+      type: "agent.delivery.offer.request",
+      requestId: "offer-1",
+      agentId: "agent-1",
+      text: "continue",
+      messageId: "wake-1",
+    });
+    expect(response).toEqual({
+      type: "agent.delivery.offer.response",
+      payload: {
+        requestId: "offer-1",
+        agentId: "agent-1",
+        status: "deferred",
+        deferral: "pending_permission",
+        error: null,
+      },
+    });
+  });
+
+  test("parses the agentDeliveryOffer server feature gate", () => {
+    const parsed = parseServerInfoStatusPayload({
+      status: "server_info",
+      serverId: "srv-test",
+      features: {
+        agentDeliveryOffer: true,
+      },
+    });
+
+    if (!parsed) {
+      throw new Error("Expected server info payload to parse");
+    }
+    expect(parsed.features?.agentDeliveryOffer).toBe(true);
+  });
+
   test("parses the agentDetach server feature gate", () => {
     const parsed = parseServerInfoStatusPayload({
       status: "server_info",

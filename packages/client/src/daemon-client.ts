@@ -96,6 +96,7 @@ import type {
   DaemonConfigReloadResponse,
   DiagnosticsResponse,
   AgentRewindResponseMessage,
+  AgentDeliveryOfferResponseMessage,
   ListTerminalsResponse,
   CreateTerminalResponse,
   SubscribeTerminalResponse,
@@ -3291,6 +3292,21 @@ export class DaemonClient {
       throw new Error(payload.error ?? "Agent rewind failed");
     }
     return payload;
+  }
+
+  async offerAgentDelivery(
+    agentId: string,
+    text: string,
+    messageId: string,
+  ): Promise<AgentDeliveryOfferResponseMessage["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest<"agent.delivery.offer.response">({
+      message: {
+        type: "agent.delivery.offer.request",
+        agentId,
+        text,
+        messageId,
+      },
+    });
   }
 
   async cancelAgent(agentId: string): Promise<void> {

@@ -4516,6 +4516,57 @@ test("detaches an agent through the namespaced detach RPC", async () => {
   await expect(promise).resolves.toBeUndefined();
 });
 
+test("offers agent delivery without treating deferral as a transport error", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const promise = client.offerAgentDelivery("agent-1", "continue", "wake-1");
+
+  expect(mock.sent).toHaveLength(1);
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request).toMatchObject({
+    type: "agent.delivery.offer.request",
+    agentId: "agent-1",
+    text: "continue",
+    messageId: "wake-1",
+  });
+  expect(typeof request.requestId).toBe("string");
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.delivery.offer.response",
+      payload: {
+        requestId: request.requestId,
+        agentId: "agent-1",
+        status: "deferred",
+        deferral: "busy",
+        error: null,
+      },
+    }),
+  );
+
+  await expect(promise).resolves.toEqual({
+    requestId: request.requestId,
+    agentId: "agent-1",
+    status: "deferred",
+    deferral: "busy",
+    error: null,
+  });
+});
+
 test("sends active-scoped fetch_agents_request", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

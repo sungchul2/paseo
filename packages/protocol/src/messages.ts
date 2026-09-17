@@ -1978,6 +1978,28 @@ export const AgentRewindResponseMessageSchema = z.object({
   }),
 });
 
+export const DeliveryOfferStatusSchema = z.enum(["accepted", "deferred", "duplicate", "rejected"]);
+export const DeliveryOfferDeferralSchema = z.enum(["busy", "pending_permission"]);
+
+export const AgentDeliveryOfferRequestMessageSchema = z.object({
+  type: z.literal("agent.delivery.offer.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  text: z.string(),
+  messageId: z.string().min(1),
+});
+
+export const AgentDeliveryOfferResponseMessageSchema = z.object({
+  type: z.literal("agent.delivery.offer.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    status: DeliveryOfferStatusSchema,
+    deferral: DeliveryOfferDeferralSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const UpdateAgentResponseMessageSchema = z.object({
   type: z.literal("update_agent_response"),
   payload: AgentActionResponsePayloadSchema,
@@ -3173,6 +3195,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentConfigApplyRequestMessageSchema,
   AgentDetachRequestMessageSchema,
   AgentRewindRequestMessageSchema,
+  AgentDeliveryOfferRequestMessageSchema,
   AgentPermissionResponseMessageSchema,
   CheckoutStatusRequestSchema,
   SubscribeCheckoutDiffRequestSchema,
@@ -3447,6 +3470,8 @@ export const ServerInfoStatusPayloadSchema = z
       .object({
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.
         agentRequestReceipts: z.boolean().optional(),
+        // COMPAT(agentDeliveryOffer): added in v0.8.x; remove gate after 2027-03-17.
+        agentDeliveryOffer: z.boolean().optional(),
         // COMPAT(hubAgentRpc): added in v0.8.0; remove gate after 2027-03-05.
         hubAgentRpc: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
@@ -6584,6 +6609,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentConfigApplyResponseMessageSchema,
   AgentDetachResponseMessageSchema,
   AgentRewindResponseMessageSchema,
+  AgentDeliveryOfferResponseMessageSchema,
   UpdateAgentResponseMessageSchema,
   ProjectRenameResponseSchema,
   ProjectIconSetResponseSchema,
@@ -6786,6 +6812,12 @@ export type SetAgentFeatureResponseMessage = z.infer<typeof SetAgentFeatureRespo
 export type AgentConfigApplyResponseMessage = z.infer<typeof AgentConfigApplyResponseMessageSchema>;
 export type AgentDetachResponseMessage = z.infer<typeof AgentDetachResponseMessageSchema>;
 export type AgentRewindResponseMessage = z.infer<typeof AgentRewindResponseMessageSchema>;
+export type AgentDeliveryOfferRequestMessage = z.infer<
+  typeof AgentDeliveryOfferRequestMessageSchema
+>;
+export type AgentDeliveryOfferResponseMessage = z.infer<
+  typeof AgentDeliveryOfferResponseMessageSchema
+>;
 export type UpdateAgentResponseMessage = z.infer<typeof UpdateAgentResponseMessageSchema>;
 export type ProjectRenameResponse = z.infer<typeof ProjectRenameResponseSchema>;
 export type ProjectIconSetResponse = z.infer<typeof ProjectIconSetResponseSchema>;

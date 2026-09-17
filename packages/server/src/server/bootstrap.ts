@@ -150,6 +150,7 @@ import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AgentWatchdogNotifier } from "./watchdog/notifier.js";
 import { WatchdogService } from "./watchdog/service.js";
+import { createDaemonDeliveryOfferer } from "./agent/delivery-offer.js";
 import { DetachedWatchdogLauncher, FileWatchdogResultReader } from "./watchdog/system.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { createOrchestrationSkills } from "./orchestration-skills/index.js";
@@ -1362,12 +1363,24 @@ export async function createPaseoDaemon(
   );
   logger.info({ elapsed: elapsed() }, "Preparing voice and MCP runtime");
 
+  const deliveryOffers = createDaemonDeliveryOfferer(
+    config.paseoHome,
+    agentManager,
+    agentStorage,
+    logger,
+  );
   const watchdogService = new WatchdogService({
     paseoHome: config.paseoHome,
     logger,
     launcher: new DetachedWatchdogLauncher(config.paseoHome),
     resultReader: new FileWatchdogResultReader(config.paseoHome),
-    notifier: new AgentWatchdogNotifier(config.paseoHome, agentManager, agentStorage, logger),
+    notifier: new AgentWatchdogNotifier(
+      config.paseoHome,
+      agentManager,
+      agentStorage,
+      logger,
+      deliveryOffers,
+    ),
   });
 
   const createAgentToolHostDependencies = (
@@ -1730,6 +1743,7 @@ export async function createPaseoDaemon(
               orchestrationSkills,
               workspaceLabelService,
               watchdogService,
+              deliveryOffers,
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();

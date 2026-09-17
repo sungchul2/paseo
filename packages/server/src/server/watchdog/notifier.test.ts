@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentManager, ManagedAgent } from "../agent/agent-manager.js";
 import type { AgentStorage } from "../agent/agent-storage.js";
+import { AgentDeliveryOfferer, createAgentManagerDeliveryGate } from "../agent/delivery-offer.js";
 import { AgentWatchdogNotifier, watchdogWakeClientMessageId } from "./notifier.js";
 import type { StoredWatchdogJob } from "./service.js";
 
@@ -158,5 +159,35 @@ function createNotifier(options: {
   const agentStorage = {
     get: vi.fn(async () => ({ id: agent.id, archivedAt: null })),
   } as unknown as AgentStorage;
-  return new AgentWatchdogNotifier("/tmp/paseo", agentManager, agentStorage, createTestLogger());
+  const logger = createTestLogger();
+  return new AgentWatchdogNotifier(
+    "/tmp/paseo",
+    agentManager,
+    agentStorage,
+    logger,
+    new AgentDeliveryOfferer(
+      createAgentManagerDeliveryGate(agentManager, agentStorage, logger),
+      memoryJournal(),
+    ),
+  );
+}
+
+function memoryJournal() {
+  const records = new Map<
+    string,
+    { agentId: string; messageId: string; fingerprint: string; state: "accepted" | "completed" }
+  >();
+  return {
+    async read(agentId: string, messageId: string) {
+      return records.get(`${agentId}:${messageId}`) ?? null;
+    },
+    async write(receipt: {
+      agentId: string;
+      messageId: string;
+      fingerprint: string;
+      state: "accepted" | "completed";
+    }) {
+      records.set(`${receipt.agentId}:${receipt.messageId}`, receipt);
+    },
+  };
 }

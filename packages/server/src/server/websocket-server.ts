@@ -14,6 +14,7 @@ import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js
 import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { WatchdogService } from "./watchdog/service.js";
+import { resolveDaemonDeliveryOfferer, type AgentDeliveryOfferer } from "./agent/delivery-offer.js";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
 import {
@@ -554,6 +555,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceLabelService: WorkspaceLabelService | null;
   private readonly scheduleService: ScheduleService;
   private readonly watchdogService: WatchdogService | null;
+  private readonly deliveryOffers: AgentDeliveryOfferer;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -653,6 +655,7 @@ export class VoiceAssistantWebSocketServer {
     orchestrationSkills?: SessionOptions["orchestrationSkills"],
     workspaceLabelService?: WorkspaceLabelService,
     watchdogService?: WatchdogService,
+    deliveryOffers?: AgentDeliveryOfferer,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -681,6 +684,13 @@ export class VoiceAssistantWebSocketServer {
     });
     this.scheduleService = requiredServices.scheduleService;
     this.watchdogService = watchdogService ?? null;
+    this.deliveryOffers = resolveDaemonDeliveryOfferer(
+      paseoHome,
+      agentManager,
+      agentStorage,
+      this.logger,
+      deliveryOffers,
+    );
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
     this.workspaceGitService = workspaceGitService ?? createFallbackWorkspaceGitService();
@@ -1423,6 +1433,7 @@ export class VoiceAssistantWebSocketServer {
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
       watchdogService: this.watchdogService ?? undefined,
+      deliveryOffers: this.deliveryOffers,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -1638,6 +1649,8 @@ export class VoiceAssistantWebSocketServer {
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         agentRequestReceipts: true,
+        // COMPAT(agentDeliveryOffer): added in v0.8.x; remove gate after 2027-03-17.
+        agentDeliveryOffer: true,
         hubAgentRpc: true,
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
         directorySync: true,

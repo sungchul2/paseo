@@ -22,6 +22,7 @@ import type {
   WorkspaceProjectDescriptorPayload,
   RefreshProvidersSnapshotResponseMessage,
   SendAgentMessageRequest,
+  AgentDeliveryOfferResponseMessage,
   SessionOutboundMessage,
   WorkspaceDescriptorPayload,
   WorkspaceCreateRequest,
@@ -260,6 +261,15 @@ export interface PaseoAgentSendOptions {
   attachments?: SendAgentMessageRequest["attachments"];
 }
 
+export interface PaseoAgentDeliveryOfferOptions {
+  messageId: string;
+}
+
+export type PaseoAgentDeliveryOfferResult = Omit<
+  AgentDeliveryOfferResponseMessage["payload"],
+  "requestId"
+>;
+
 export interface PaseoAgentRunOptions extends PaseoAgentSendOptions {
   timeoutMs?: number;
 }
@@ -335,6 +345,15 @@ export interface PaseoAgentHandle {
   current(): PaseoAgent | null;
   refresh(requestId?: string): Promise<PaseoAgentRefetchResult | null>;
   send(text: string, options?: PaseoAgentSendOptions): Promise<void>;
+  /**
+   * Atomically admits a prompt only when the agent is idle and has no pending
+   * permission. Does not interrupt an active turn or clear a permission prompt.
+   * `messageId` is the durable identity used for crash-window dedupe.
+   */
+  offerWhenIdle(
+    text: string,
+    options: PaseoAgentDeliveryOfferOptions,
+  ): Promise<PaseoAgentDeliveryOfferResult>;
   respondToPermission(options: PaseoAgentRespondToPermissionOptions): Promise<void>;
   /** Sends a prompt and resolves when that turn finishes or needs attention. */
   run(text: string, options?: PaseoAgentRunOptions): Promise<PaseoAgentRunResult>;
@@ -741,6 +760,15 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       },
       send: async (text, options) => {
         await daemonClient.sendAgentMessage(id, text, options);
+      },
+      offerWhenIdle: async (text, options) => {
+        const payload = await daemonClient.offerAgentDelivery(id, text, options.messageId);
+        return {
+          agentId: payload.agentId,
+          status: payload.status,
+          deferral: payload.deferral,
+          error: payload.error,
+        };
       },
       respondToPermission: async ({ requestId, response }) => {
         await daemonClient.respondToPermission(id, requestId, response);

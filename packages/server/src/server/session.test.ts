@@ -31,6 +31,7 @@ import { createPersistedProjectRecord } from "./workspace-registry.js";
 import { deriveProjectKey } from "./project-key.js";
 import type { SessionOptions } from "./session.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "./messages.js";
+import { AgentDeliveryOfferer } from "./agent/delivery-offer.js";
 import {
   asSessionInternals as asSessionInternalsHelper,
   asAgentManager,
@@ -329,6 +330,7 @@ interface SessionForTestOptions {
   pluginRuntime?: SessionOptions["pluginRuntime"];
   orchestrationSkills?: SessionOptions["orchestrationSkills"];
   workspaceLabelService?: WorkspaceLabelService;
+  deliveryOffers?: SessionOptions["deliveryOffers"];
 }
 
 function createSessionForTest(options: SessionForTestOptions = {}): Session {
@@ -433,9 +435,356 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     daemonVersion: options.daemonVersion,
     daemonRuntimeConfig: options.daemonRuntimeConfig,
     permissions: options.permissions ?? OWNER_PERMISSIONS,
+    deliveryOffers: options.deliveryOffers,
   };
   return new Session(sessionOptions);
 }
+
+const DELIVERY_OFFER_AGENT_ID = "11111111-1111-4111-8111-111111111111";
+
+function deliveryOfferJournal() {
+  const records = new Map<
+    string,
+    { agentId: string; messageId: string; fingerprint: string; state: "accepted" | "completed" }
+  >();
+  return {
+    async read(agentId: string, messageId: string) {
+      return records.get(`${agentId}:${messageId}`) ?? null;
+    },
+    async write(receipt: {
+      agentId: string;
+      messageId: string;
+      fingerprint: string;
+      state: "accepted" | "completed";
+    }) {
+      records.set(`${receipt.agentId}:${receipt.messageId}`, receipt);
+    },
+  };
+}
+
+describe("agent.delivery.offer session RPC", () => {
+  test("accepts an idle offer and defers a second offer while busy", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const send = vi.fn(async () => undefined);
+    const session = createSessionForTest({
+      messages,
+      agentStorage: {
+        get: vi.fn().mockResolvedValue({
+          id: DELIVERY_OFFER_AGENT_ID,
+          internal: false,
+          lastStatus: "idle",
+        }),
+        list: vi
+          .fn()
+          .mockResolvedValue([{ id: DELIVERY_OFFER_AGENT_ID, internal: false, title: "Agent" }]),
+      },
+      deliveryOffers: new AgentDeliveryOfferer(
+        {
+          inspect: async () => ({
+            exists: true,
+            archived: false,
+            closed: false,
+            busy: send.mock.calls.length > 0,
+            pendingPermission: false,
+            hasMessage: false,
+          }),
+          send,
+        },
+        deliveryOfferJournal(),
+      ),
+    });
+
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "offer-1",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "continue",
+      messageId: "wake-1",
+    });
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "offer-2",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "later",
+      messageId: "wake-2",
+    });
+
+    expect(messages).toEqual([
+      {
+        type: "agent.delivery.offer.response",
+        payload: {
+          requestId: "offer-1",
+          agentId: DELIVERY_OFFER_AGENT_ID,
+          status: "accepted",
+          deferral: null,
+          error: null,
+        },
+      },
+      {
+        type: "agent.delivery.offer.response",
+        payload: {
+          requestId: "offer-2",
+          agentId: DELIVERY_OFFER_AGENT_ID,
+          status: "deferred",
+          deferral: "busy",
+          error: null,
+        },
+      },
+    ]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  test("serializes two concurrent offers so only one send is admitted", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    let inspecting = 0;
+    let peak = 0;
+    let sent = 0;
+    const session = createSessionForTest({
+      messages,
+      agentStorage: {
+        get: vi.fn().mockResolvedValue({
+          id: DELIVERY_OFFER_AGENT_ID,
+          internal: false,
+          lastStatus: "idle",
+        }),
+        list: vi
+          .fn()
+          .mockResolvedValue([{ id: DELIVERY_OFFER_AGENT_ID, internal: false, title: "Agent" }]),
+      },
+      deliveryOffers: new AgentDeliveryOfferer(
+        {
+          inspect: async () => {
+            inspecting += 1;
+            peak = Math.max(peak, inspecting);
+            await Promise.resolve();
+            const snapshot = {
+              exists: true,
+              archived: false,
+              closed: false,
+              busy: sent > 0,
+              pendingPermission: false,
+              hasMessage: false,
+            };
+            inspecting -= 1;
+            return snapshot;
+          },
+          send: async () => {
+            sent += 1;
+          },
+        },
+        deliveryOfferJournal(),
+      ),
+    });
+
+    await Promise.all([
+      session.handleMessage({
+        type: "agent.delivery.offer.request",
+        requestId: "a",
+        agentId: DELIVERY_OFFER_AGENT_ID,
+        text: "one",
+        messageId: "wake-a",
+      }),
+      session.handleMessage({
+        type: "agent.delivery.offer.request",
+        requestId: "b",
+        agentId: DELIVERY_OFFER_AGENT_ID,
+        text: "two",
+        messageId: "wake-b",
+      }),
+    ]);
+
+    expect(peak).toBe(1);
+    expect(sent).toBe(1);
+    const statuses = messages
+      .filter((message) => message.type === "agent.delivery.offer.response")
+      .map((message) => message.payload.status);
+    expect(statuses).toContain("accepted");
+    expect(statuses).toContain("deferred");
+  });
+
+  test("retries an accepted crash window until idle and then completes", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const state = {
+      exists: true,
+      archived: false,
+      closed: false,
+      busy: false,
+      pendingPermission: false,
+      hasMessage: false,
+    };
+    const send = vi.fn(async () => {
+      throw new Error("process died after accept");
+    });
+    const session = createSessionForTest({
+      messages,
+      agentStorage: {
+        get: vi.fn().mockResolvedValue({
+          id: DELIVERY_OFFER_AGENT_ID,
+          internal: false,
+          lastStatus: "idle",
+        }),
+        list: vi
+          .fn()
+          .mockResolvedValue([{ id: DELIVERY_OFFER_AGENT_ID, internal: false, title: "Agent" }]),
+      },
+      deliveryOffers: new AgentDeliveryOfferer(
+        {
+          inspect: async () => ({ ...state }),
+          send,
+        },
+        deliveryOfferJournal(),
+      ),
+    });
+
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "crash",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "continue",
+      messageId: "wake-crash",
+    });
+    state.busy = true;
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "busy",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "continue",
+      messageId: "wake-crash",
+    });
+    state.busy = false;
+    send.mockImplementation(async () => undefined);
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "retry",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "continue",
+      messageId: "wake-crash",
+    });
+
+    expect(
+      messages
+        .filter((message) => message.type === "agent.delivery.offer.response")
+        .map((message) => message.payload),
+    ).toEqual([
+      {
+        requestId: "crash",
+        agentId: DELIVERY_OFFER_AGENT_ID,
+        status: "rejected",
+        deferral: null,
+        error: "process died after accept",
+      },
+      {
+        requestId: "busy",
+        agentId: DELIVERY_OFFER_AGENT_ID,
+        status: "deferred",
+        deferral: "busy",
+        error: null,
+      },
+      {
+        requestId: "retry",
+        agentId: DELIVERY_OFFER_AGENT_ID,
+        status: "accepted",
+        deferral: null,
+        error: null,
+      },
+    ]);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  test("rejects unauthorized callers without offering", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const offer = vi.fn();
+    const session = createSessionForTest({
+      messages,
+      permissions: ["workspace.read"],
+      deliveryOffers: { offer } as unknown as SessionOptions["deliveryOffers"],
+      agentStorage: {
+        get: vi.fn().mockResolvedValue({
+          id: DELIVERY_OFFER_AGENT_ID,
+          internal: false,
+          lastStatus: "idle",
+        }),
+        list: vi
+          .fn()
+          .mockResolvedValue([{ id: DELIVERY_OFFER_AGENT_ID, internal: false, title: "Agent" }]),
+      },
+    });
+
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "denied",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "continue",
+      messageId: "wake-denied",
+    });
+
+    expect(offer).not.toHaveBeenCalled();
+    expect(messages).toEqual([
+      {
+        type: "rpc_error",
+        payload: {
+          requestId: "denied",
+          requestType: "agent.delivery.offer.request",
+          error: "Session is not authorized for agent.delivery.offer.request",
+          code: "access_denied",
+        },
+      },
+    ]);
+  });
+
+  test("allows hub.execute to offer without workspace.write", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({
+      messages,
+      permissions: ["hub.execute"],
+      agentStorage: {
+        get: vi.fn().mockResolvedValue({
+          id: DELIVERY_OFFER_AGENT_ID,
+          internal: false,
+          lastStatus: "idle",
+        }),
+        list: vi
+          .fn()
+          .mockResolvedValue([{ id: DELIVERY_OFFER_AGENT_ID, internal: false, title: "Agent" }]),
+      },
+      deliveryOffers: new AgentDeliveryOfferer(
+        {
+          inspect: async () => ({
+            exists: true,
+            archived: false,
+            closed: false,
+            busy: false,
+            pendingPermission: false,
+            hasMessage: false,
+          }),
+          send: async () => undefined,
+        },
+        deliveryOfferJournal(),
+      ),
+    });
+
+    await session.handleMessage({
+      type: "agent.delivery.offer.request",
+      requestId: "hub",
+      agentId: DELIVERY_OFFER_AGENT_ID,
+      text: "continue",
+      messageId: "wake-hub",
+    });
+
+    expect(messages).toEqual([
+      {
+        type: "agent.delivery.offer.response",
+        payload: {
+          requestId: "hub",
+          agentId: DELIVERY_OFFER_AGENT_ID,
+          status: "accepted",
+          deferral: null,
+          error: null,
+        },
+      },
+    ]);
+  });
+});
 
 test("routes host-scoped agent skills requests through the daemon owner", async () => {
   const messages: SessionOutboundMessage[] = [];
