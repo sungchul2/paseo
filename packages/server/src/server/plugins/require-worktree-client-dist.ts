@@ -31,9 +31,15 @@ export function requireWorktreeClientDist(): string {
   const clientDist = path.join(worktreeRoot, "packages", "client", "dist", "index.js");
   const setup = [
     `From worktree root: ${worktreeRoot}`,
-    "Build only these worktree artifacts (do not symlink live integration-dev deps):",
+    "This git worktree sits under the live integration-dev checkout, so Node/TypeScript can walk into the parent `node_modules` when a workspace package has no local `dist` types.",
+    "Do not symlink this worktree onto live integration-dev package node_modules. Unlink only task-owned live-pointing workspace symlinks, then `npm install --ignore-scripts --prefer-offline`.",
+    "Build these worktree artifacts (do not delete client dist to unstick typecheck):",
     "  npx tsc -p packages/protocol/tsconfig.json --incremental false",
     "  npx tsc -p packages/client/tsconfig.json --incremental false",
+    "  npx tsc -p packages/plugin/tsconfig.json --incremental false",
+    "  npx tsc -p packages/highlight/tsconfig.json --incremental false",
+    "  npx tsc -p packages/relay/tsconfig.json --incremental false",
+    "  npx tsc -p packages/server/tsconfig.server.json --incremental false",
     "Then from packages/server:",
     "  npm exec --no -- vitest run src/server/plugins/plugin-delivery-offer-ipc.posix.test.ts --maxWorkers=1",
   ].join("\n");
