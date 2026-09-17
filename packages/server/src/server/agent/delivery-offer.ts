@@ -1,17 +1,14 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import type { Logger } from "pino";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { waitForAgentRunStartWithTimeout } from "./agent-prompt.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import type { AgentManager } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
-import {
-  sendPromptToAgent,
-  waitForAgentRunStartWithTimeout,
-  type SendPromptToAgentParams,
-} from "./agent-prompt.js";
 
 export const DeliveryOfferStatusSchema = z.enum(["accepted", "deferred", "duplicate", "rejected"]);
 export const DeliveryOfferDeferralSchema = z.enum(["busy", "pending_permission"]);
@@ -40,28 +37,33 @@ export interface DeliveryOfferInspection {
   hasMessage: boolean;
 }
 
+export type DeliveryOfferDispatchResult =
+  | { status: "accepted" }
+  | { status: "deferred"; deferral: DeliveryOfferDeferral }
+  | { status: "rejected"; error: string };
+
 export interface DeliveryOfferGate {
   inspect(agentId: string, messageId: string): Promise<DeliveryOfferInspection>;
-  send(input: DeliveryOfferInput): Promise<void>;
+  send(input: DeliveryOfferInput): Promise<DeliveryOfferDispatchResult | void>;
 }
 
 const ReceiptSchema = z.object({
   agentId: z.string(),
   messageId: z.string(),
   fingerprint: z.string(),
-  state: z.enum(["accepted", "completed"]),
+  state: z.enum(["recorded", "accepted", "completed"]),
 });
-type Receipt = z.infer<typeof ReceiptSchema>;
+export type DeliveryOfferReceipt = z.infer<typeof ReceiptSchema>;
 
 export interface DeliveryOfferJournal {
-  read(agentId: string, messageId: string): Promise<Receipt | null>;
-  write(receipt: Receipt): Promise<void>;
+  read(agentId: string, messageId: string): Promise<DeliveryOfferReceipt | null>;
+  write(receipt: DeliveryOfferReceipt): Promise<void>;
 }
 
 export class FileDeliveryOfferJournal implements DeliveryOfferJournal {
   constructor(private readonly directory: string) {}
 
-  async read(agentId: string, messageId: string): Promise<Receipt | null> {
+  async read(agentId: string, messageId: string): Promise<DeliveryOfferReceipt | null> {
     try {
       return ReceiptSchema.parse(
         JSON.parse(await readFile(this.filePath(agentId, messageId), "utf8")),
@@ -72,7 +74,7 @@ export class FileDeliveryOfferJournal implements DeliveryOfferJournal {
     }
   }
 
-  async write(receipt: Receipt): Promise<void> {
+  async write(receipt: DeliveryOfferReceipt): Promise<void> {
     await mkdir(path.dirname(this.filePath(receipt.agentId, receipt.messageId)), {
       recursive: true,
     });
@@ -98,21 +100,25 @@ export class AgentDeliveryOfferer {
     return this.serialized(input.agentId, () => this.offerLocked(input));
   }
 
+  /** Visible for tests: per-agent serialization tails must not grow without bound. */
+  pendingTailCount(): number {
+    return this.tails.size;
+  }
+
   private async serialized<T>(agentId: string, work: () => Promise<T>): Promise<T> {
     const previous = this.tails.get(agentId) ?? Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.tails.set(
-      agentId,
-      previous.then(() => gate).catch(() => gate),
+    const run = previous.catch(() => undefined).then(work);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
     );
-    await previous.catch(() => undefined);
+    this.tails.set(agentId, tail);
     try {
-      return await work();
+      return await run;
     } finally {
-      release();
+      if (this.tails.get(agentId) === tail) {
+        this.tails.delete(agentId);
+      }
     }
   }
 
@@ -132,6 +138,60 @@ export class AgentDeliveryOfferer {
     }
 
     const inspection = await this.gate.inspect(input.agentId, input.messageId);
+    const preAdmit = await this.preAdmitResult(inspection, existing);
+    if (preAdmit) {
+      return preAdmit;
+    }
+
+    // Fingerprint lock only. `accepted` is reserved for actual dispatch admission.
+    if (!existing || existing.state === "recorded") {
+      await this.journal.write({
+        agentId: input.agentId,
+        messageId: input.messageId,
+        fingerprint,
+        state: "recorded",
+      });
+    }
+
+    let dispatched: DeliveryOfferDispatchResult;
+    try {
+      dispatched = (await this.gate.send(input)) ?? { status: "accepted" };
+    } catch (error) {
+      return {
+        status: "rejected",
+        deferral: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (dispatched.status === "deferred") {
+      return { status: "deferred", deferral: dispatched.deferral, error: null };
+    }
+    if (dispatched.status === "rejected") {
+      return { status: "rejected", deferral: null, error: dispatched.error };
+    }
+
+    await this.journal.write({
+      agentId: input.agentId,
+      messageId: input.messageId,
+      fingerprint,
+      state: "accepted",
+    });
+    const after = await this.gate.inspect(input.agentId, input.messageId);
+    if (after.hasMessage) {
+      await this.journal.write({
+        agentId: input.agentId,
+        messageId: input.messageId,
+        fingerprint,
+        state: "completed",
+      });
+    }
+    return { status: "accepted", deferral: null, error: null };
+  }
+
+  private async preAdmitResult(
+    inspection: DeliveryOfferInspection,
+    existing: DeliveryOfferReceipt | null,
+  ): Promise<DeliveryOfferResult | null> {
     if (inspection.hasMessage || existing?.state === "completed") {
       if (existing && existing.state !== "completed") {
         await this.journal.write({ ...existing, state: "completed" });
@@ -153,38 +213,14 @@ export class AgentDeliveryOfferer {
     if (inspection.busy) {
       return { status: "deferred", deferral: "busy", error: null };
     }
-    if (existing?.state !== "accepted") {
-      await this.journal.write({
-        agentId: input.agentId,
-        messageId: input.messageId,
-        fingerprint,
-        state: "accepted",
-      });
-    }
-
-    try {
-      await this.gate.send(input);
-    } catch (error) {
-      return {
-        status: "rejected",
-        deferral: null,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-    await this.journal.write({
-      agentId: input.agentId,
-      messageId: input.messageId,
-      fingerprint,
-      state: "completed",
-    });
-    return { status: "accepted", deferral: null, error: null };
+    return null;
   }
 }
 
 export function createAgentManagerDeliveryGate(
   agentManager: AgentManager,
   agentStorage: AgentStorage,
-  logger: SendPromptToAgentParams["logger"],
+  logger: Logger,
 ): DeliveryOfferGate {
   return {
     async inspect(agentId, messageId) {
@@ -199,6 +235,29 @@ export function createAgentManagerDeliveryGate(
           hasMessage: false,
         };
       }
+      // Archived history must not resume a provider session as a read side effect.
+      if (record.archivedAt) {
+        return {
+          exists: true,
+          archived: true,
+          closed: false,
+          busy: false,
+          pendingPermission: false,
+          hasMessage: false,
+        };
+      }
+      const liveBeforeLoad = agentManager.getAgent(agentId);
+      if (!liveBeforeLoad && record.lastStatus === "closed") {
+        return {
+          exists: true,
+          archived: false,
+          closed: true,
+          busy: false,
+          pendingPermission: false,
+          hasMessage: false,
+        };
+      }
+
       await ensureAgentLoaded(agentId, {
         agentManager,
         agentStorage,
@@ -207,35 +266,42 @@ export function createAgentManagerDeliveryGate(
       const snapshot = agentManager.getAgent(agentId);
       const wakeAlreadyPresent = (item: { type: string; clientMessageId?: string }): boolean =>
         item.type === "user_message" && item.clientMessageId === messageId;
-      const liveHasMessage = agentManager.getTimeline(agentId).some(wakeAlreadyPresent);
-      const durableHasMessage = (await agentManager.getTimelineRows(agentId)).some((row) =>
-        wakeAlreadyPresent(row.item),
+      const liveHasMessage = snapshot
+        ? agentManager.getTimeline(agentId).some(wakeAlreadyPresent)
+        : false;
+      const durableHasMessage = snapshot
+        ? (await agentManager.getTimelineRows(agentId)).some((row) => wakeAlreadyPresent(row.item))
+        : false;
+      const closed = snapshot ? snapshot.lifecycle === "closed" : record.lastStatus === "closed";
+      const canQuerySession = Boolean(
+        snapshot && snapshot.lifecycle !== "closed" && snapshot.session,
       );
       return {
         exists: true,
-        archived: Boolean(record.archivedAt),
-        closed: snapshot ? snapshot.lifecycle === "closed" : record.lastStatus === "closed",
-        busy: agentManager.hasInFlightRun(agentId),
-        pendingPermission: agentManager.getPendingPermissions(agentId).length > 0,
+        archived: false,
+        closed,
+        busy: canQuerySession ? agentManager.hasInFlightRun(agentId) : false,
+        pendingPermission: canQuerySession
+          ? agentManager.getPendingPermissions(agentId).length > 0
+          : false,
         hasMessage: liveHasMessage || durableHasMessage,
       };
     },
     async send(input) {
-      const disposition = await sendPromptToAgent({
-        agentManager,
-        agentStorage,
-        agentId: input.agentId,
-        prompt: input.text,
-        messageId: input.messageId,
-        activeTurnBehavior: "steer",
-        replaceRunning: false,
-        clearPendingPermissions: false,
-        unarchive: false,
-        logger,
+      const admission = await agentManager.admitIdleForegroundTurn(input.agentId, input.text, {
+        clientMessageId: input.messageId,
       });
-      if (disposition.disposition === "turn_started") {
-        await waitForAgentRunStartWithTimeout(agentManager, input.agentId);
+      if (admission.status === "deferred") {
+        return { status: "deferred", deferral: admission.deferral };
       }
+      if (admission.status === "rejected") {
+        return { status: "rejected", error: idleRejectionMessage(admission.reason) };
+      }
+      void drainAgentRunIterator(admission.iterator).catch((error: unknown) => {
+        logger.warn({ err: error, agentId: input.agentId }, "Delivery offer run failed");
+      });
+      await waitForAgentRunStartWithTimeout(agentManager, input.agentId);
+      return { status: "accepted" };
     },
   };
 }
@@ -244,7 +310,7 @@ export function createDaemonDeliveryOfferer(
   paseoHome: string,
   agentManager: AgentManager,
   agentStorage: AgentStorage,
-  logger: SendPromptToAgentParams["logger"],
+  logger: Logger,
 ): AgentDeliveryOfferer {
   return new AgentDeliveryOfferer(
     createAgentManagerDeliveryGate(agentManager, agentStorage, logger),
@@ -256,10 +322,22 @@ export function resolveDaemonDeliveryOfferer(
   paseoHome: string,
   agentManager: AgentManager,
   agentStorage: AgentStorage,
-  logger: SendPromptToAgentParams["logger"],
+  logger: Logger,
   existing?: AgentDeliveryOfferer,
 ): AgentDeliveryOfferer {
   return existing ?? createDaemonDeliveryOfferer(paseoHome, agentManager, agentStorage, logger);
+}
+
+function idleRejectionMessage(reason: "not_found" | "archived" | "closed"): string {
+  if (reason === "not_found") return "Agent not found";
+  if (reason === "archived") return "Agent is archived";
+  return "Agent is closed";
+}
+
+async function drainAgentRunIterator(iterator: AsyncGenerator<unknown>): Promise<void> {
+  for await (const _ of iterator) {
+    // Events are broadcast via AgentManager subscribers.
+  }
 }
 
 function digest(value: unknown): string {

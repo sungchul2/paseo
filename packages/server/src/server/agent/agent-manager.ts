@@ -318,6 +318,11 @@ export type ActiveTurnSteerDispatchResult =
   | { status: "inactive" | "steered" }
   | { status: "replaced"; iterator: AsyncGenerator<AgentStreamEvent> };
 
+export type IdleTurnAdmission =
+  | { status: "accepted"; iterator: AsyncGenerator<AgentStreamEvent> }
+  | { status: "deferred"; deferral: "busy" | "pending_permission" }
+  | { status: "rejected"; reason: "not_found" | "archived" | "closed" };
+
 function stripSteerOptions(options?: AgentSteerOptions): AgentRunOptions | undefined {
   if (!options) return undefined;
   const { clearPendingPermissions: _, ...runOptions } = options;
@@ -916,6 +921,50 @@ export class AgentManager {
       Boolean(agent.activeForegroundTurnId) ||
       this.runs.hasRun(agentId)
     );
+  }
+
+  /**
+   * Shared idle-only admission. Must stay synchronous: the final permission/idle
+   * checks and `createPendingRun` (via `streamAgent`) share one turn of the event
+   * loop so UI/send/schedule/permission dispatch cannot interleave. Never steers
+   * or replaces an active turn.
+   */
+  tryStartIdleTurn(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): IdleTurnAdmission {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+      return { status: "rejected", reason: "not_found" };
+    }
+    if (agent.session === null) {
+      return { status: "rejected", reason: "closed" };
+    }
+    if (agent.pendingPermissions.size > 0) {
+      return { status: "deferred", deferral: "pending_permission" };
+    }
+    if (this.hasInFlightRun(agentId)) {
+      return { status: "deferred", deferral: "busy" };
+    }
+    try {
+      const iterator = this.streamAgent(agentId, prompt, options);
+      return { status: "accepted", iterator };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("already has an active run")) {
+        return { status: "deferred", deferral: "busy" };
+      }
+      throw error;
+    }
+  }
+
+  async admitIdleForegroundTurn(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): Promise<IdleTurnAdmission> {
+    await this.drainSessionEvents(agentId);
+    return this.tryStartIdleTurn(agentId, prompt, options);
   }
 
   subscribe(callback: AgentSubscriber, options?: SubscribeOptions): () => void {

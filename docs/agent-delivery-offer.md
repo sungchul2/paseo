@@ -15,16 +15,22 @@ Prerequisite public API for safe automatic resume. Consume-lineage from `integra
 
 Statuses: `accepted` | `deferred` | `duplicate` | `rejected`
 
-- `deferred.busy`: in-flight turn; retry when idle. No interrupt.
+- `deferred.busy`: in-flight turn at the shared AgentManager admission boundary. No interrupt, steer, or replace.
 - `deferred.pending_permission`: human permission prompt is open; do not clear it.
-- `duplicate`: canonical `user_message.clientMessageId` already exists, including crash windows after accept.
-- `rejected`: missing/archived/closed agent, fingerprint conflict (`agent_delivery_key_conflict`), or send failure after the durable `accepted` receipt
+- `duplicate`: canonical `user_message.clientMessageId` already exists, including crash windows after that persist.
+- `rejected`: missing/archived/closed agent, fingerprint conflict (`agent_delivery_key_conflict`), or dispatch failure
 
-Admission is per-agent mutexed. The journal writes `accepted` before send and `completed` after send. A crash between those states retries send only after the live busy/permission checks pass again.
+Idle admission is `AgentManager.tryStartIdleTurn`: the final idle/permission checks and `createPendingRun` run in one synchronous section. Offer-specific mutexes are not the safety boundary. Callers that lose the race are deferred; they never steer or replace.
 
-Send flags: `activeTurnBehavior: "steer"`, `replaceRunning: false`, `clearPendingPermissions: false`, `unarchive: false`.
+Inspect rejects archived agents from storage **before** `ensureAgentLoaded`, so archived history is not resumed as a read side effect.
 
-Plugin RPC and core watchdog notifier share one `AgentDeliveryOfferer` instance created in bootstrap.
+## Receipts
+
+- `recorded`: fingerprint claimed; dispatch has not been admitted
+- `accepted`: `tryStartIdleTurn` actually reserved the run
+- `completed`: canonical `user_message.clientMessageId` is on the timeline
+
+A pre-admit journal write may await. After that await, send still goes through `admitIdleForegroundTurn` / `tryStartIdleTurn` and must defer instead of interrupting.
 
 ## Out of scope for this slice
 

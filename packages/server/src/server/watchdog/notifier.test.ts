@@ -141,17 +141,36 @@ function createNotifier(options: {
   getTimeline?: AgentManager["getTimeline"];
   getTimelineRows?: AgentManager["getTimelineRows"];
 }): AgentWatchdogNotifier {
+  const streamAgent = vi.fn(options.streamAgent);
+  const hasInFlightRun = vi.fn(options.hasInFlightRun ?? (() => false));
+  const getPendingPermissions = vi.fn(options.getPendingPermissions ?? (() => []));
+  const tryStartIdleTurn = vi.fn((agentId: string, prompt: unknown, runOptions: unknown) => {
+    if (getPendingPermissions(agentId).length > 0) {
+      return { status: "deferred" as const, deferral: "pending_permission" as const };
+    }
+    if (hasInFlightRun(agentId)) {
+      return { status: "deferred" as const, deferral: "busy" as const };
+    }
+    return {
+      status: "accepted" as const,
+      iterator: streamAgent(agentId, prompt as never, runOptions as never),
+    };
+  });
   const agentManager = {
     getAgent: vi.fn(() => agent),
     waitForAgentClose: vi.fn(),
     waitForAgentRunStart: options.waitForAgentRunStart ?? vi.fn(async () => undefined),
-    hasInFlightRun: vi.fn(options.hasInFlightRun ?? (() => false)),
-    getPendingPermissions: vi.fn(options.getPendingPermissions ?? (() => [])),
+    hasInFlightRun,
+    getPendingPermissions,
     getTimeline: vi.fn(options.getTimeline ?? (() => [])),
     getTimelineRows: vi.fn(options.getTimelineRows ?? (async () => [])),
     tryRunOutOfBand: vi.fn(() => false),
     steerOrReplaceActiveTurn: vi.fn(async () => ({ status: "inactive" as const })),
-    streamAgent: vi.fn(options.streamAgent),
+    streamAgent,
+    tryStartIdleTurn,
+    admitIdleForegroundTurn: vi.fn(async (agentId: string, prompt: unknown, runOptions: unknown) =>
+      tryStartIdleTurn(agentId, prompt, runOptions),
+    ),
     setAgentMode: vi.fn(),
     unarchiveSnapshot: vi.fn(),
     notifyAgentState: vi.fn(),
@@ -175,7 +194,12 @@ function createNotifier(options: {
 function memoryJournal() {
   const records = new Map<
     string,
-    { agentId: string; messageId: string; fingerprint: string; state: "accepted" | "completed" }
+    {
+      agentId: string;
+      messageId: string;
+      fingerprint: string;
+      state: "recorded" | "accepted" | "completed";
+    }
   >();
   return {
     async read(agentId: string, messageId: string) {
@@ -185,7 +209,7 @@ function memoryJournal() {
       agentId: string;
       messageId: string;
       fingerprint: string;
-      state: "accepted" | "completed";
+      state: "recorded" | "accepted" | "completed";
     }) {
       records.set(`${receipt.agentId}:${receipt.messageId}`, receipt);
     },

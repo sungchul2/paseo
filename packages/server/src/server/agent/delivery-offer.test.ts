@@ -9,6 +9,7 @@ import {
   type DeliveryOfferGate,
   type DeliveryOfferInput,
   type DeliveryOfferInspection,
+  type DeliveryOfferReceipt,
 } from "./delivery-offer.js";
 
 const idle: DeliveryOfferInspection = {
@@ -41,7 +42,7 @@ function createGate(
 
 describe("AgentDeliveryOfferer", () => {
   test("accepts an idle agent without interrupting or clearing permissions", async () => {
-    const send = vi.fn(async () => undefined);
+    const send = vi.fn(async () => ({ status: "accepted" as const }));
     const offerer = new AgentDeliveryOfferer(createGate(idle, send), memoryJournal());
 
     await expect(offerer.offer(input())).resolves.toEqual({
@@ -51,10 +52,11 @@ describe("AgentDeliveryOfferer", () => {
     });
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(input());
+    expect(offerer.pendingTailCount()).toBe(0);
   });
 
   test("defers when the agent is busy and does not send", async () => {
-    const send = vi.fn(async () => undefined);
+    const send = vi.fn(async () => ({ status: "accepted" as const }));
     const offerer = new AgentDeliveryOfferer(
       createGate({ ...idle, busy: true }, send),
       memoryJournal(),
@@ -69,7 +71,7 @@ describe("AgentDeliveryOfferer", () => {
   });
 
   test("defers pending permissions without sending", async () => {
-    const send = vi.fn(async () => undefined);
+    const send = vi.fn(async () => ({ status: "accepted" as const }));
     const offerer = new AgentDeliveryOfferer(
       createGate({ ...idle, pendingPermission: true }, send),
       memoryJournal(),
@@ -81,6 +83,22 @@ describe("AgentDeliveryOfferer", () => {
       error: null,
     });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  test("honors gate.send deferral after inspect looked idle", async () => {
+    const send = vi.fn(async () => ({ status: "deferred" as const, deferral: "busy" as const }));
+    const journal = memoryJournal();
+    const offerer = new AgentDeliveryOfferer(createGate(idle, send), journal);
+
+    await expect(offerer.offer(input())).resolves.toEqual({
+      status: "deferred",
+      deferral: "busy",
+      error: null,
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    await expect(journal.read("agent-1", input().messageId)).resolves.toMatchObject({
+      state: "recorded",
+    });
   });
 
   test("serializes two concurrent deliverers so only one send is accepted", async () => {
@@ -101,6 +119,7 @@ describe("AgentDeliveryOfferer", () => {
       },
       send: async () => {
         sent += 1;
+        return { status: "accepted" as const };
       },
     };
     const offerer = new AgentDeliveryOfferer(gate, memoryJournal());
@@ -114,13 +133,15 @@ describe("AgentDeliveryOfferer", () => {
     expect(
       results.filter((result) => result.status === "deferred" && result.deferral === "busy"),
     ).toHaveLength(1);
+    expect(offerer.pendingTailCount()).toBe(0);
   });
 
-  test("retries send after crash past acceptance when the timeline still lacks the message", async () => {
+  test("retries send after crash past fingerprint record when the timeline still lacks the message", async () => {
     let attempts = 0;
     const send = vi.fn(async () => {
       attempts += 1;
       if (attempts === 1) throw new Error("process died after accept");
+      return { status: "accepted" as const };
     });
     const offerer = new AgentDeliveryOfferer(createGate(idle, send), memoryJournal());
 
@@ -159,7 +180,7 @@ describe("AgentDeliveryOfferer", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  test("keeps an accepted receipt queued until the agent is idle again", async () => {
+  test("keeps a recorded receipt queued until the agent is idle again", async () => {
     const state = { ...idle };
     const send = vi.fn(async () => {
       throw new Error("process died after accept");
@@ -180,7 +201,7 @@ describe("AgentDeliveryOfferer", () => {
     });
     expect(send).toHaveBeenCalledTimes(1);
     state.busy = false;
-    send.mockImplementation(async () => undefined);
+    send.mockImplementation(async () => ({ status: "accepted" as const }));
     await expect(offerer.offer(input())).resolves.toEqual({
       status: "accepted",
       deferral: null,
@@ -189,11 +210,25 @@ describe("AgentDeliveryOfferer", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
-  test("treats a second offer of the same message identity as duplicate", async () => {
-    const send = vi.fn(async () => undefined);
-    const offerer = new AgentDeliveryOfferer(createGate(idle, send), memoryJournal());
+  test("treats a second offer of the same persisted canonical message as duplicate", async () => {
+    const state = { ...idle };
+    const send = vi.fn(async () => {
+      state.hasMessage = true;
+      return { status: "accepted" as const };
+    });
+    const journal = memoryJournal();
+    const offerer = new AgentDeliveryOfferer(
+      {
+        inspect: async () => ({ ...state }),
+        send,
+      },
+      journal,
+    );
 
     await expect(offerer.offer(input())).resolves.toMatchObject({ status: "accepted" });
+    await expect(journal.read("agent-1", input().messageId)).resolves.toMatchObject({
+      state: "completed",
+    });
     await expect(offerer.offer(input())).resolves.toEqual({
       status: "duplicate",
       deferral: null,
@@ -202,8 +237,29 @@ describe("AgentDeliveryOfferer", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  test("records fingerprint before dispatch and accepted only after send admits", async () => {
+    const writes: DeliveryOfferReceipt["state"][] = [];
+    const journal = memoryJournal();
+    const originalWrite = journal.write.bind(journal);
+    journal.write = async (receipt) => {
+      writes.push(receipt.state);
+      await originalWrite(receipt);
+    };
+    const send = vi.fn(async () => {
+      expect(writes).toEqual(["recorded"]);
+      return { status: "accepted" as const };
+    });
+    const offerer = new AgentDeliveryOfferer(createGate(idle, send), journal);
+
+    await expect(offerer.offer(input())).resolves.toMatchObject({ status: "accepted" });
+    expect(writes).toEqual(["recorded", "accepted"]);
+    await expect(journal.read("agent-1", input().messageId)).resolves.toMatchObject({
+      state: "accepted",
+    });
+  });
+
   test("rejects a reused message id with a different body", async () => {
-    const send = vi.fn(async () => undefined);
+    const send = vi.fn(async () => ({ status: "accepted" as const }));
     const offerer = new AgentDeliveryOfferer(createGate(idle, send), memoryJournal());
     await offerer.offer(input());
 
@@ -215,19 +271,21 @@ describe("AgentDeliveryOfferer", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  test("file journal survives offerer reconstruction", async () => {
+  test("file journal survives offerer reconstruction once the canonical message exists", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "paseo-delivery-offer-"));
     try {
-      const send = vi.fn(async () => undefined);
-      const first = new AgentDeliveryOfferer(
-        createGate(idle, send),
-        new FileDeliveryOfferJournal(directory),
-      );
+      const state = { ...idle };
+      const send = vi.fn(async () => {
+        state.hasMessage = true;
+        return { status: "accepted" as const };
+      });
+      const gate: DeliveryOfferGate = {
+        inspect: async () => ({ ...state }),
+        send,
+      };
+      const first = new AgentDeliveryOfferer(gate, new FileDeliveryOfferJournal(directory));
       await expect(first.offer(input())).resolves.toMatchObject({ status: "accepted" });
-      const second = new AgentDeliveryOfferer(
-        createGate(idle, send),
-        new FileDeliveryOfferJournal(directory),
-      );
+      const second = new AgentDeliveryOfferer(gate, new FileDeliveryOfferJournal(directory));
       await expect(second.offer(input())).resolves.toMatchObject({ status: "duplicate" });
       expect(send).toHaveBeenCalledTimes(1);
     } finally {
@@ -237,20 +295,12 @@ describe("AgentDeliveryOfferer", () => {
 });
 
 function memoryJournal() {
-  const records = new Map<
-    string,
-    { agentId: string; messageId: string; fingerprint: string; state: "accepted" | "completed" }
-  >();
+  const records = new Map<string, DeliveryOfferReceipt>();
   return {
     async read(agentId: string, messageId: string) {
       return records.get(`${agentId}:${messageId}`) ?? null;
     },
-    async write(receipt: {
-      agentId: string;
-      messageId: string;
-      fingerprint: string;
-      state: "accepted" | "completed";
-    }) {
+    async write(receipt: DeliveryOfferReceipt) {
       records.set(`${receipt.agentId}:${receipt.messageId}`, receipt);
     },
   };

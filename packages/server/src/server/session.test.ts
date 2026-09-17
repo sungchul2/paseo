@@ -445,7 +445,12 @@ const DELIVERY_OFFER_AGENT_ID = "11111111-1111-4111-8111-111111111111";
 function deliveryOfferJournal() {
   const records = new Map<
     string,
-    { agentId: string; messageId: string; fingerprint: string; state: "accepted" | "completed" }
+    {
+      agentId: string;
+      messageId: string;
+      fingerprint: string;
+      state: "recorded" | "accepted" | "completed";
+    }
   >();
   return {
     async read(agentId: string, messageId: string) {
@@ -455,7 +460,7 @@ function deliveryOfferJournal() {
       agentId: string;
       messageId: string;
       fingerprint: string;
-      state: "accepted" | "completed";
+      state: "recorded" | "accepted" | "completed";
     }) {
       records.set(`${receipt.agentId}:${receipt.messageId}`, receipt);
     },
